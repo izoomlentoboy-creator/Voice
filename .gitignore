@@ -31,3 +31,8 @@ Thumbs.db
 # Environment
 .env
 .venv/
+
+# Server
+server/tbvoice.db
+server/uploads/
+reports/

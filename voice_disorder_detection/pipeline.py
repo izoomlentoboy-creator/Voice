@@ -1,18 +1,17 @@
 """High-level pipeline that ties together all components.
 
 Provides a single interface for training, prediction, feedback,
-and self-testing workflows.
+self-testing, SHAP analysis, and baseline comparison.
 """
 
-import json
 import logging
+from typing import Optional
+
 import numpy as np
-from pathlib import Path
-from typing import Optional, Union
 
 from . import config
 from .data_loader import VoiceDataLoader
-from .feature_extractor import extract_all_features, get_feature_names
+from .feature_extractor import extract_all_features
 from .feedback import FeedbackManager
 from .model import VoiceDisorderModel
 from .self_test import SelfTester
@@ -26,11 +25,13 @@ class VoiceDisorderPipeline:
     def __init__(
         self,
         mode: str = config.MODE_BINARY,
+        backend: str = config.BACKEND_ENSEMBLE,
         dbdir: Optional[str] = None,
         download_mode: str = "lazy",
     ):
         self.mode = mode
-        self.model = VoiceDisorderModel(mode=mode)
+        self.backend = backend
+        self.model = VoiceDisorderModel(mode=mode, backend=backend)
         self.tester = SelfTester(self.model)
         self.feedback = FeedbackManager(self.model)
         self._loader = None
@@ -41,8 +42,7 @@ class VoiceDisorderPipeline:
     def loader(self) -> VoiceDataLoader:
         if self._loader is None:
             self._loader = VoiceDataLoader(
-                dbdir=self._dbdir,
-                download_mode=self._download_mode,
+                dbdir=self._dbdir, download_mode=self._download_mode,
             )
         return self._loader
 
@@ -53,53 +53,31 @@ class VoiceDisorderPipeline:
         max_samples: Optional[int] = None,
         use_cache: bool = True,
         run_evaluation: bool = True,
+        augment: bool = False,
     ) -> dict:
-        """Full training pipeline: load data, extract features, train, evaluate.
-
-        Parameters
-        ----------
-        max_samples : int, optional
-            Limit samples for faster experimentation.
-        use_cache : bool
-            Use feature cache.
-        run_evaluation : bool
-            Run evaluation after training.
-
-        Returns
-        -------
-        dict
-            Training and evaluation results.
-        """
+        """Full training pipeline with patient-level evaluation."""
         result = {}
+        logger.info("=== Training pipeline (mode=%s, backend=%s) ===", self.mode, self.backend)
 
-        # Extract features
-        logger.info("=== Starting training pipeline (mode=%s) ===", self.mode)
-        X, y, session_ids = self.loader.extract_dataset(
-            mode=self.mode,
-            max_samples=max_samples,
-            use_cache=use_cache,
+        X, y, session_ids, speaker_ids, metadata = self.loader.extract_dataset(
+            mode=self.mode, max_samples=max_samples,
+            use_cache=use_cache, augment=augment,
         )
 
-        # Train
-        train_meta = self.model.train(X, y, session_ids=session_ids)
+        train_meta = self.model.train(X, y, session_ids=session_ids, speaker_ids=speaker_ids)
         result["training"] = train_meta
 
-        # Evaluate
         if run_evaluation and len(X) >= 20:
-            eval_result = self.tester.run_full_evaluation(X, y)
+            eval_result = self.tester.run_full_evaluation(X, y, speaker_ids=speaker_ids)
             result["evaluation"] = {
-                "accuracy": eval_result["accuracy"],
-                "f1": eval_result["f1_weighted"],
-                "precision": eval_result["precision_weighted"],
-                "recall": eval_result["recall_weighted"],
-                "auc_roc": eval_result.get("auc_roc"),
+                k: eval_result.get(k)
+                for k in ["accuracy", "sensitivity", "specificity", "f1_weighted",
+                           "auc_roc", "pr_auc", "brier_score", "ece", "split"]
             }
 
-        # Save model
         model_path = self.model.save()
         result["model_path"] = str(model_path)
 
-        # Feature importance
         importance = self.model.get_feature_importance()
         if importance:
             result["top_features"] = dict(list(importance.items())[:10])
@@ -107,44 +85,63 @@ class VoiceDisorderPipeline:
         logger.info("=== Training pipeline complete ===")
         return result
 
+    # ---- Baseline comparison ----
+
+    def compare_baselines(
+        self, max_samples: Optional[int] = None,
+    ) -> dict:
+        """Compare ensemble vs LogReg baseline with patient-level CV."""
+        X, y, _, speaker_ids, _ = self.loader.extract_dataset(
+            mode=self.mode, max_samples=max_samples, use_cache=True,
+        )
+
+        results = {}
+        for backend_name in [config.BACKEND_ENSEMBLE, config.BACKEND_LOGREG]:
+            logger.info("Evaluating baseline: %s", backend_name)
+            m = VoiceDisorderModel(mode=self.mode, backend=backend_name)
+            t = SelfTester(m)
+            cv = t.run_cross_validation(X, y, speaker_ids=speaker_ids, n_folds=config.CV_FOLDS)
+            results[backend_name] = {
+                "accuracy": cv["accuracy_mean"],
+                "accuracy_std": cv["accuracy_std"],
+                "f1": cv["f1_mean"],
+                "sensitivity": cv["sensitivity_mean"],
+                "specificity": cv["specificity_mean"],
+                "auc_roc": cv["auc_roc_mean"],
+                "pr_auc": cv["pr_auc_mean"],
+                "brier": cv["brier_mean"],
+            }
+
+        # CNN baseline
+        try:
+
+            logger.info("Evaluating baseline: cnn (MLP on mel-spectrogram)")
+            # This requires re-extracting spectrograms — skip if too slow
+            results["cnn"] = {"note": "CNN baseline requires separate spectrogram extraction. Run with --backend cnn."}
+        except Exception:
+            pass
+
+        return results
+
     # ---- Prediction ----
 
-    def predict_from_audio(
-        self,
-        audio: np.ndarray,
-        sr: int,
-    ) -> dict:
-        """Predict voice disorder from raw audio.
-
-        Parameters
-        ----------
-        audio : np.ndarray
-            Raw audio signal (int16 or float).
-        sr : int
-            Sampling rate.
-
-        Returns
-        -------
-        dict
-            Prediction result with label, confidence, and probabilities.
-        """
+    def predict_from_audio(self, audio: np.ndarray, sr: int) -> dict:
+        """Predict with abstain support."""
         self._ensure_model_loaded()
         features = extract_all_features(audio, sr)
         results = self.model.predict_with_confidence(features.reshape(1, -1))
         return results[0]
 
     def predict_from_file(self, audio_path: str) -> dict:
-        """Predict from an audio file (WAV, FLAC, etc.)."""
+        """Predict from an audio file."""
         import librosa
-
         self._ensure_model_loaded()
         audio, sr = librosa.load(audio_path, sr=None)
         return self.predict_from_audio(audio, sr)
 
     def predict_from_session(self, session_id: int) -> dict:
-        """Predict using recordings from a specific database session."""
+        """Predict using recordings from a database session."""
         self._ensure_model_loaded()
-
         session = self.loader.db.get_session(
             session_id, query_recordings=True, query_pathologies=True,
         )
@@ -168,73 +165,34 @@ class VoiceDisorderPipeline:
             features_list.append(feats)
 
         if not features_list:
-            raise ValueError(
-                f"No usable recordings found in session {session_id}"
-            )
+            raise ValueError(f"No usable recordings in session {session_id}")
 
         combined = np.mean(features_list, axis=0).reshape(1, -1)
         results = self.model.predict_with_confidence(combined)
         prediction = results[0]
 
-        # Add ground truth if available
         prediction["session_id"] = session_id
         prediction["actual_type"] = session.type
         if session.pathologies:
-            prediction["actual_pathologies"] = [
-                p.name for p in session.pathologies
-            ]
-
+            prediction["actual_pathologies"] = [p.name for p in session.pathologies]
         return prediction
 
     # ---- Feedback ----
 
     def correct_prediction(
-        self,
-        audio: np.ndarray,
-        sr: int,
-        correct_label: int,
-        session_id: Optional[int] = None,
-        note: str = "",
+        self, audio: np.ndarray, sr: int, correct_label: int,
+        session_id: Optional[int] = None, note: str = "",
     ) -> dict:
-        """Submit a correction for a prediction.
-
-        Parameters
-        ----------
-        audio : np.ndarray
-            The audio that was misclassified.
-        sr : int
-            Sampling rate.
-        correct_label : int
-            The true label.
-        session_id : int, optional
-            Database session ID.
-        note : str
-            Optional note.
-
-        Returns
-        -------
-        dict
-            Correction details and feedback stats.
-        """
         self._ensure_model_loaded()
         features = extract_all_features(audio, sr)
         predicted = self.model.predict(features.reshape(1, -1))[0]
-
         correction = self.feedback.add_correction(
-            features=features,
-            predicted_label=int(predicted),
-            correct_label=correct_label,
-            session_id=session_id,
-            note=note,
+            features=features, predicted_label=int(predicted),
+            correct_label=correct_label, session_id=session_id, note=note,
         )
-
-        return {
-            "correction": correction,
-            "stats": self.feedback.get_correction_stats(),
-        }
+        return {"correction": correction, "stats": self.feedback.get_correction_stats()}
 
     def apply_feedback(self, full_retrain: bool = False) -> dict:
-        """Apply accumulated feedback corrections."""
         result = self.feedback.apply_corrections(full_retrain=full_retrain)
         if not full_retrain:
             self.model.save()
@@ -243,93 +201,66 @@ class VoiceDisorderPipeline:
     # ---- Self-Testing ----
 
     def self_test(
-        self,
-        max_samples: Optional[int] = None,
-        test_type: str = "full",
+        self, max_samples: Optional[int] = None, test_type: str = "full",
     ) -> dict:
-        """Run self-test on the model.
-
-        Parameters
-        ----------
-        max_samples : int, optional
-            Limit dataset size.
-        test_type : str
-            'full' for train/test evaluation, 'cv' for cross-validation,
-            'quick' for sanity check.
-
-        Returns
-        -------
-        dict
-            Test results.
-        """
-        X, y, _ = self.loader.extract_dataset(
-            mode=self.mode,
-            max_samples=max_samples,
-            use_cache=True,
+        X, y, _, speaker_ids, metadata = self.loader.extract_dataset(
+            mode=self.mode, max_samples=max_samples, use_cache=True,
         )
-
         if test_type == "quick":
             self._ensure_model_loaded()
             return self.tester.run_quick_test(X, y)
         elif test_type == "cv":
-            return self.tester.run_cross_validation(X, y)
+            return self.tester.run_cross_validation(X, y, speaker_ids=speaker_ids)
+        elif test_type == "subgroups":
+            return self.tester.run_subgroup_analysis(X, y, metadata, speaker_ids=speaker_ids)
         else:
-            return self.tester.run_full_evaluation(X, y)
+            return self.tester.run_full_evaluation(X, y, speaker_ids=speaker_ids)
 
-    def optimize(
-        self,
-        max_samples: Optional[int] = None,
-        n_iter: int = 20,
-    ) -> dict:
-        """Run hyperparameter optimization and retrain with best params."""
-        X, y, session_ids = self.loader.extract_dataset(
-            mode=self.mode,
-            max_samples=max_samples,
-            use_cache=True,
+    def optimize(self, max_samples: Optional[int] = None, n_iter: int = 20) -> dict:
+        X, y, session_ids, speaker_ids, _ = self.loader.extract_dataset(
+            mode=self.mode, max_samples=max_samples, use_cache=True,
         )
-
-        opt_result = self.tester.optimize_hyperparameters(X, y, n_iter=n_iter)
-
-        # Retrain with full data using the model's default (already good) params
-        # The optimization result informs the user about potential improvements
-        self.model.train(X, y, session_ids=session_ids)
+        opt_result = self.tester.optimize_hyperparameters(X, y, speaker_ids=speaker_ids, n_iter=n_iter)
+        self.model.train(X, y, session_ids=session_ids, speaker_ids=speaker_ids)
         self.model.save()
-
         return opt_result
+
+    # ---- SHAP ----
+
+    def explain(self, max_samples: Optional[int] = None) -> dict:
+        """Run SHAP analysis on the model."""
+        from .interpretability import compute_shap_values
+
+        self._ensure_model_loaded()
+        X, y, _, _, _ = self.loader.extract_dataset(
+            mode=self.mode, max_samples=max_samples, use_cache=True,
+        )
+        return compute_shap_values(self.model, X)
 
     # ---- Status ----
 
     def status(self) -> dict:
-        """Get current system status."""
         result = {
             "mode": self.mode,
+            "backend": self.backend,
             "model_trained": self.model.is_trained,
-            "model_file_exists": config.model_path(self.mode).exists(),
+            "model_file_exists": config.model_path(self.mode, self.backend).exists(),
         }
-
         if self.model.is_trained:
             result["training_metadata"] = self.model.training_metadata
-
         result["feedback"] = self.feedback.get_correction_stats()
         result["performance"] = self.tester.get_performance_summary()
         result["regression_check"] = self.tester.check_regression()
-
         try:
             result["database"] = self.loader.get_database_stats()
         except Exception as e:
             result["database"] = {"error": str(e)}
-
         return result
 
-    # ---- Internal ----
-
     def _ensure_model_loaded(self) -> None:
-        """Load the model from disk if not already trained."""
         if not self.model.is_trained:
-            model_file = config.model_path(self.mode)
+            model_file = config.model_path(self.mode, self.backend)
             if model_file.exists():
                 self.model.load()
             else:
-                raise RuntimeError(
-                    "No trained model available. Run 'train' first."
-                )
+                raise RuntimeError("No trained model available. Run 'train' first.")

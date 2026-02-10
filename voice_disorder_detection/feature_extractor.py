@@ -4,9 +4,10 @@ Converts raw audio signals into feature vectors suitable for classification.
 Extracts spectral, cepstral, temporal, and prosodic features.
 """
 
-import numpy as np
-import librosa
 from typing import Optional
+
+import librosa
+import numpy as np
 
 from . import config
 
@@ -60,6 +61,11 @@ def extract_mfcc_features(audio: np.ndarray, sr: int) -> np.ndarray:
     Returns aggregated statistics over time frames:
     mean, std, min, max, skew, kurtosis for each coefficient.
     """
+    # Ensure audio is long enough for feature extraction (min ~0.1s at target SR)
+    min_samples = config.N_FFT + config.HOP_LENGTH * 8  # need >=9 frames for delta
+    if len(audio) < min_samples:
+        audio = np.pad(audio, (0, min_samples - len(audio)), mode="constant")
+
     mfccs = librosa.feature.mfcc(
         y=audio, sr=sr, n_mfcc=config.N_MFCC,
         n_fft=config.N_FFT, hop_length=config.HOP_LENGTH,
@@ -267,7 +273,7 @@ def _aggregate_over_time(features_2d: np.ndarray) -> np.ndarray:
 
     For each feature row, computes: mean, std, min, max, skewness, kurtosis.
     """
-    from scipy.stats import skew, kurtosis
+    from scipy.stats import kurtosis, skew
 
     result = []
     for row in features_2d:

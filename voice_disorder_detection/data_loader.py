@@ -2,18 +2,19 @@
 
 Handles database initialization, audio loading, feature extraction,
 caching, and dataset preparation for training/evaluation.
+Key: tracks speaker_id for patient-level splitting.
 """
 
 import json
 import logging
-import numpy as np
-from pathlib import Path
 from typing import Optional
 
-from sbvoicedb import SbVoiceDb, Recording, RecordingSession
+import numpy as np
+from sbvoicedb import SbVoiceDb
 
 from . import config
-from .feature_extractor import extract_all_features
+from .augmentation import augment_audio
+from .feature_extractor import extract_all_features, preprocess_audio
 
 logger = logging.getLogger(__name__)
 
@@ -27,16 +28,6 @@ class VoiceDataLoader:
         download_mode: str = "lazy",
         utterances: Optional[list[str]] = None,
     ):
-        """
-        Parameters
-        ----------
-        dbdir : str, optional
-            Database directory. None uses default.
-        download_mode : str
-            'lazy', 'immediate', or 'off'.
-        utterances : list[str], optional
-            Which utterances to use. Default: config.UTTERANCES_FOR_TRAINING.
-        """
         self.dbdir = dbdir or config.DB_DIR
         self.download_mode = download_mode
         self.utterances = utterances or config.UTTERANCES_FOR_TRAINING
@@ -57,46 +48,44 @@ class VoiceDataLoader:
         mode: str = config.MODE_BINARY,
         max_samples: Optional[int] = None,
         use_cache: bool = True,
-    ) -> tuple[np.ndarray, np.ndarray, list[int]]:
+        augment: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray, list[int], list[int], list[dict]]:
         """Extract features and labels from the database.
-
-        Parameters
-        ----------
-        mode : str
-            'binary' for healthy/pathological, 'multiclass' for specific disorders.
-        max_samples : int, optional
-            Limit the number of samples (for faster experimentation).
-        use_cache : bool
-            If True, try to load from / save to cache.
 
         Returns
         -------
         X : np.ndarray, shape (n_samples, n_features)
-            Feature matrix.
         y : np.ndarray, shape (n_samples,)
-            Labels (0=healthy, 1=pathological for binary; class indices for multiclass).
+            Labels (0=healthy, 1=pathological for binary).
         session_ids : list[int]
-            Session IDs corresponding to each sample.
+        speaker_ids : list[int]
+            Speaker IDs for patient-level splitting.
+        metadata : list[dict]
+            Per-sample metadata (gender, age, pathologies).
         """
         cache_file = config.feature_cache_path()
-        cache_key = f"{mode}_{max_samples}_{'-'.join(sorted(self.utterances))}"
+        cache_key = f"{mode}_{max_samples}_{augment}_{'-'.join(sorted(self.utterances))}"
 
         if use_cache and cache_file.exists():
             try:
                 cached = np.load(cache_file, allow_pickle=True)
-                if cached.get("cache_key", "") == cache_key:
+                if str(cached.get("cache_key", "")) == cache_key:
                     logger.info("Loading features from cache: %s", cache_file)
+                    meta = cached["metadata"].item() if "metadata" in cached else []
                     return (
                         cached["X"],
                         cached["y"],
                         cached["session_ids"].tolist(),
+                        cached["speaker_ids"].tolist(),
+                        meta if isinstance(meta, list) else [],
                     )
             except Exception as e:
                 logger.warning("Cache load failed: %s", e)
 
-        logger.info("Extracting features (mode=%s)...", mode)
-        X_list, y_list, session_ids = [], [], []
-        pathology_map = {}  # name -> index, for multiclass
+        logger.info("Extracting features (mode=%s, augment=%s)...", mode, augment)
+        X_list, y_list, session_ids, speaker_ids = [], [], [], []
+        metadata_list = []
+        pathology_map = {}
 
         count = 0
         for session in self.db.iter_sessions():
@@ -117,7 +106,7 @@ class VoiceDataLoader:
                 label = 0 if session_full.type == "n" else 1
             else:
                 if session_full.type == "n":
-                    label = 0  # healthy
+                    label = 0
                     pathology_map.setdefault("[Healthy]", 0)
                 else:
                     pathologies = session_full.pathologies
@@ -128,15 +117,25 @@ class VoiceDataLoader:
                         pathology_map[pname] = len(pathology_map)
                     label = pathology_map[pname]
 
+            # Collect per-sample metadata
+            sample_meta = {
+                "session_id": session_full.id,
+                "speaker_id": session_full.speaker_id,
+                "gender": session_full.speaker.gender if session_full.speaker else None,
+                "age": session_full.speaker_age,
+                "type": session_full.type,
+                "pathologies": [p.name for p in session_full.pathologies]
+                if session_full.pathologies else [],
+            }
+
             # Extract features from each relevant recording
             session_features = []
+            session_audios = []  # keep raw audio for augmentation
             for rec in session_full.recordings:
                 if rec.utterance not in self.utterances:
                     continue
 
-                rec_full = self.db.get_recording(
-                    rec.id, full_file_paths=True
-                )
+                rec_full = self.db.get_recording(rec.id, full_file_paths=True)
                 if rec_full is None:
                     continue
 
@@ -151,6 +150,9 @@ class VoiceDataLoader:
                 try:
                     feats = extract_all_features(audio, rec_full.rate)
                     session_features.append(feats)
+                    if augment:
+                        processed = preprocess_audio(audio, rec_full.rate)
+                        session_audios.append((processed, config.SAMPLE_RATE))
                 except Exception as e:
                     logger.warning(
                         "Feature extraction failed for recording %d: %s",
@@ -160,12 +162,31 @@ class VoiceDataLoader:
             if not session_features:
                 continue
 
-            # Average features across utterances for this session
+            # Original sample
             combined = np.mean(session_features, axis=0)
             X_list.append(combined)
             y_list.append(label)
-            session_ids.append(session.id)
+            session_ids.append(session_full.id)
+            speaker_ids.append(session_full.speaker_id)
+            metadata_list.append(sample_meta)
             count += 1
+
+            # Augmented samples (same speaker_id -> same group for splitting)
+            if augment and session_audios:
+                for audio_float, sr in session_audios[:2]:  # limit per session
+                    try:
+                        aug_versions = augment_audio(audio_float, sr)
+                        for aug_audio in aug_versions[:3]:  # limit augmentations
+                            aug_feats = extract_all_features(
+                                aug_audio, sr, preprocess=False,
+                            )
+                            X_list.append(aug_feats)
+                            y_list.append(label)
+                            session_ids.append(session_full.id)
+                            speaker_ids.append(session_full.speaker_id)
+                            metadata_list.append({**sample_meta, "augmented": True})
+                    except Exception:
+                        pass
 
             if count % 50 == 0:
                 logger.info("Processed %d sessions...", count)
@@ -186,6 +207,8 @@ class VoiceDataLoader:
                     cache_file,
                     X=X, y=y,
                     session_ids=np.array(session_ids),
+                    speaker_ids=np.array(speaker_ids),
+                    metadata=np.array(metadata_list, dtype=object),
                     cache_key=cache_key,
                 )
                 logger.info("Features cached to %s", cache_file)
@@ -199,14 +222,12 @@ class VoiceDataLoader:
                 json.dump(pathology_map, f, ensure_ascii=False, indent=2)
 
         logger.info(
-            "Extraction complete: %d samples, %d features, %d classes",
-            X.shape[0], X.shape[1], len(np.unique(y)),
+            "Extraction complete: %d samples, %d features, %d classes, %d unique speakers",
+            X.shape[0], X.shape[1], len(np.unique(y)), len(set(speaker_ids)),
         )
-        return X, y, session_ids
+        return X, y, session_ids, speaker_ids, metadata_list
 
-    def extract_single(
-        self, audio: np.ndarray, sr: int
-    ) -> np.ndarray:
+    def extract_single(self, audio: np.ndarray, sr: int) -> np.ndarray:
         """Extract features from a single audio signal for prediction."""
         return extract_all_features(audio, sr)
 

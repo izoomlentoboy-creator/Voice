@@ -40,6 +40,23 @@ CV_FOLDS = 5
 MODE_BINARY = "binary"           # healthy vs pathological
 MODE_MULTICLASS = "multiclass"   # specific disorder detection
 
+# Model backends
+BACKEND_ENSEMBLE = "ensemble"    # SVM + RF + GB
+BACKEND_LOGREG = "logreg"       # Logistic regression baseline
+BACKEND_CNN = "cnn"             # CNN / MLP on mel-spectrogram
+
+# --- Abstain ---
+ABSTAIN_THRESHOLD = 0.6          # Refuse prediction if max_proba < this
+
+# --- Augmentation ---
+AUGMENT_NOISE_LEVELS = [0.002, 0.005, 0.01]
+AUGMENT_PITCH_STEPS = [-2, -1, 1, 2]  # semitones
+AUGMENT_TIME_STRETCH = [0.9, 1.1]
+
+# --- CNN / mel-spectrogram ---
+MEL_SPEC_MAX_FRAMES = 128        # Pad/truncate spectrograms to this width
+MEL_PCA_COMPONENTS = 200         # PCA reduction for flattened spectrogram
+
 # --- Feedback ---
 MAX_FEEDBACK_BUFFER = 100        # Retrain after this many corrections
 FEEDBACK_FILE = FEEDBACK_DIR / "corrections.json"
@@ -49,11 +66,11 @@ SELFTEST_RESULTS_FILE = LOGS_DIR / "selftest_results.json"
 PERFORMANCE_HISTORY_FILE = LOGS_DIR / "performance_history.json"
 
 # --- Model files ---
-def model_path(mode: str) -> Path:
-    return MODELS_DIR / f"voice_disorder_{mode}.joblib"
+def model_path(mode: str, backend: str = BACKEND_ENSEMBLE) -> Path:
+    return MODELS_DIR / f"voice_disorder_{mode}_{backend}.joblib"
 
-def scaler_path(mode: str) -> Path:
-    return MODELS_DIR / f"scaler_{mode}.joblib"
+def scaler_path(mode: str, backend: str = BACKEND_ENSEMBLE) -> Path:
+    return MODELS_DIR / f"scaler_{mode}_{backend}.joblib"
 
 def label_encoder_path(mode: str) -> Path:
     return MODELS_DIR / f"label_encoder_{mode}.joblib"

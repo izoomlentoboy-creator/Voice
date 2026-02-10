@@ -2,13 +2,15 @@
 """Voice Disorder Detection System — CLI entry point.
 
 Usage:
-    python main.py train [--mode binary|multiclass] [--max-samples N] [--no-cache]
+    python main.py train [--backend ensemble|logreg] [--augment] [--max-samples N]
     python main.py predict --file <audio_path>
     python main.py predict --session <session_id>
-    python main.py feedback --session <session_id> --label <correct_label> [--note "..."]
+    python main.py compare-baselines [--max-samples N]
+    python main.py feedback --session <session_id> --label <correct_label>
     python main.py apply-feedback [--full-retrain]
-    python main.py self-test [--type full|cv|quick] [--max-samples N]
+    python main.py self-test [--type full|cv|quick|subgroups] [--max-samples N]
     python main.py optimize [--max-samples N] [--iterations N]
+    python main.py explain [--max-samples N]
     python main.py status
     python main.py db-info
 """
@@ -31,33 +33,23 @@ def setup_logging(verbose: bool = False) -> None:
     )
 
 
-def cmd_train(args: argparse.Namespace) -> None:
-    """Train the model."""
+def cmd_train(args):
     pipeline = VoiceDisorderPipeline(
-        mode=args.mode,
-        dbdir=args.dbdir,
-        download_mode="lazy",
+        mode=args.mode, backend=args.backend, dbdir=args.dbdir,
     )
-
     result = pipeline.train(
         max_samples=args.max_samples,
         use_cache=not args.no_cache,
-        run_evaluation=True,
+        augment=args.augment,
     )
-
     print("\n" + "=" * 60)
     print("TRAINING COMPLETE")
     print("=" * 60)
     print(json.dumps(result, indent=2, default=str))
 
 
-def cmd_predict(args: argparse.Namespace) -> None:
-    """Predict voice disorder."""
-    pipeline = VoiceDisorderPipeline(
-        mode=args.mode,
-        dbdir=args.dbdir,
-    )
-
+def cmd_predict(args):
+    pipeline = VoiceDisorderPipeline(mode=args.mode, backend=args.backend, dbdir=args.dbdir)
     if args.file:
         result = pipeline.predict_from_file(args.file)
     elif args.session is not None:
@@ -69,43 +61,49 @@ def cmd_predict(args: argparse.Namespace) -> None:
     print("\n" + "=" * 60)
     print("PREDICTION RESULT")
     print("=" * 60)
-
     label = result["label"]
-    confidence = result["confidence"]
-
-    if args.mode == config.MODE_BINARY:
-        diagnosis = "PATHOLOGICAL" if label == 1 else "HEALTHY"
-    else:
-        diagnosis = f"Class {label}"
+    diagnosis = "PATHOLOGICAL" if label == 1 else "HEALTHY" if args.mode == config.MODE_BINARY else f"Class {label}"
 
     print(f"  Diagnosis:  {diagnosis}")
-    print(f"  Confidence: {confidence:.1%}")
+    print(f"  Confidence: {result['confidence']:.1%}")
+    print(f"  Abstain:    {result['abstain']}")
+    if result.get("abstain_reason"):
+        print(f"  Reason:     {result['abstain_reason']}")
     print(f"  Probabilities: {json.dumps(result['probabilities'], indent=4)}")
-
     if "actual_type" in result:
         actual = "PATHOLOGICAL" if result["actual_type"] == "p" else "HEALTHY"
         print(f"  Actual:     {actual}")
-        if "actual_pathologies" in result:
-            print(f"  Pathologies: {', '.join(result['actual_pathologies'])}")
+    print("\n  NOTE: This is a screening tool, not a medical diagnosis.")
 
 
-def cmd_feedback(args: argparse.Namespace) -> None:
-    """Submit a correction."""
-    pipeline = VoiceDisorderPipeline(
-        mode=args.mode,
-        dbdir=args.dbdir,
-    )
+def cmd_compare(args):
+    pipeline = VoiceDisorderPipeline(mode=args.mode, dbdir=args.dbdir)
+    result = pipeline.compare_baselines(max_samples=args.max_samples)
+    print("\n" + "=" * 60)
+    print("BASELINE COMPARISON (patient-level CV)")
+    print("=" * 60)
+    for backend, metrics in result.items():
+        if isinstance(metrics, dict) and "accuracy" in metrics:
+            print(f"\n  [{backend}]")
+            print(f"    Accuracy:    {metrics['accuracy']:.4f} (+/- {metrics.get('accuracy_std', 0):.4f})")
+            print(f"    F1:          {metrics['f1']:.4f}")
+            print(f"    Sensitivity: {metrics['sensitivity']:.4f}")
+            print(f"    Specificity: {metrics['specificity']:.4f}")
+            print(f"    AUC-ROC:     {metrics['auc_roc']:.4f}")
+            print(f"    PR-AUC:      {metrics['pr_auc']:.4f}")
+            print(f"    Brier:       {metrics['brier']:.4f}")
 
-    # Get the audio from the session
-    session = pipeline.loader.db.get_session(
-        args.session, query_recordings=True,
-    )
+
+def cmd_feedback(args):
+    pipeline = VoiceDisorderPipeline(mode=args.mode, backend=args.backend, dbdir=args.dbdir)
+    session = pipeline.loader.db.get_session(args.session, query_recordings=True)
     if session is None:
         print(f"Error: session {args.session} not found", file=sys.stderr)
         sys.exit(1)
 
-    from voice_disorder_detection.feature_extractor import extract_all_features
     import numpy as np
+
+    from voice_disorder_detection.feature_extractor import extract_all_features
 
     features_list = []
     for rec in session.recordings:
@@ -129,162 +127,106 @@ def cmd_feedback(args: argparse.Namespace) -> None:
 
     combined = np.mean(features_list, axis=0)
     predicted = pipeline.model.predict(combined.reshape(1, -1))[0]
-
-    result = pipeline.feedback.add_correction(
-        features=combined,
-        predicted_label=int(predicted),
-        correct_label=args.label,
-        session_id=args.session,
-        note=args.note or "",
+    pipeline.feedback.add_correction(
+        features=combined, predicted_label=int(predicted),
+        correct_label=args.label, session_id=args.session, note=args.note or "",
     )
-
-    print("\nCorrection recorded:")
-    print(f"  Predicted: {predicted}")
-    print(f"  Correct:   {args.label}")
-    print(f"  Stats:     {json.dumps(pipeline.feedback.get_correction_stats(), indent=2)}")
+    print(f"\nCorrection recorded: predicted={predicted}, correct={args.label}")
+    print(json.dumps(pipeline.feedback.get_correction_stats(), indent=2))
 
 
-def cmd_apply_feedback(args: argparse.Namespace) -> None:
-    """Apply accumulated feedback."""
-    pipeline = VoiceDisorderPipeline(
-        mode=args.mode,
-        dbdir=args.dbdir,
-    )
-
+def cmd_apply_feedback(args):
+    pipeline = VoiceDisorderPipeline(mode=args.mode, backend=args.backend, dbdir=args.dbdir)
     result = pipeline.apply_feedback(full_retrain=args.full_retrain)
-    print("\nFeedback applied:")
     print(json.dumps(result, indent=2))
 
 
-def cmd_self_test(args: argparse.Namespace) -> None:
-    """Run self-tests."""
-    pipeline = VoiceDisorderPipeline(
-        mode=args.mode,
-        dbdir=args.dbdir,
-    )
-
-    result = pipeline.self_test(
-        max_samples=args.max_samples,
-        test_type=args.type,
-    )
-
+def cmd_self_test(args):
+    pipeline = VoiceDisorderPipeline(mode=args.mode, backend=args.backend, dbdir=args.dbdir)
+    result = pipeline.self_test(max_samples=args.max_samples, test_type=args.type)
     print("\n" + "=" * 60)
     print(f"SELF-TEST RESULTS ({args.type})")
     print("=" * 60)
     print(json.dumps(result, indent=2, default=str))
-
-    # Regression check
     regression = pipeline.tester.check_regression()
     if regression.get("status") == "regression_detected":
-        print("\n⚠ WARNING: Performance regression detected!")
+        print("\nWARNING: Performance regression detected!")
         print(json.dumps(regression, indent=2))
 
 
-def cmd_optimize(args: argparse.Namespace) -> None:
-    """Optimize hyperparameters."""
-    pipeline = VoiceDisorderPipeline(
-        mode=args.mode,
-        dbdir=args.dbdir,
-    )
+def cmd_optimize(args):
+    pipeline = VoiceDisorderPipeline(mode=args.mode, backend=args.backend, dbdir=args.dbdir)
+    result = pipeline.optimize(max_samples=args.max_samples, n_iter=args.iterations)
+    print(json.dumps(result, indent=2, default=str))
 
-    result = pipeline.optimize(
-        max_samples=args.max_samples,
-        n_iter=args.iterations,
-    )
 
+def cmd_explain(args):
+    pipeline = VoiceDisorderPipeline(mode=args.mode, backend=args.backend, dbdir=args.dbdir)
+    result = pipeline.explain(max_samples=args.max_samples)
     print("\n" + "=" * 60)
-    print("OPTIMIZATION RESULTS")
+    print("SHAP FEATURE IMPORTANCE")
     print("=" * 60)
-    print(json.dumps(result, indent=2, default=str))
+    print(json.dumps(result, indent=2))
 
 
-def cmd_status(args: argparse.Namespace) -> None:
-    """Show system status."""
-    pipeline = VoiceDisorderPipeline(
-        mode=args.mode,
-        dbdir=args.dbdir,
-        download_mode="off",
-    )
-
-    result = pipeline.status()
-    print(json.dumps(result, indent=2, default=str))
+def cmd_status(args):
+    pipeline = VoiceDisorderPipeline(mode=args.mode, backend=args.backend, dbdir=args.dbdir, download_mode="off")
+    print(json.dumps(pipeline.status(), indent=2, default=str))
 
 
-def cmd_db_info(args: argparse.Namespace) -> None:
-    """Show database information."""
-    pipeline = VoiceDisorderPipeline(
-        mode=args.mode,
-        dbdir=args.dbdir,
-        download_mode="off",
-    )
-
+def cmd_db_info(args):
+    pipeline = VoiceDisorderPipeline(mode=args.mode, dbdir=args.dbdir, download_mode="off")
     try:
-        stats = pipeline.loader.get_database_stats()
-        print("\nDatabase Information:")
-        print(json.dumps(stats, indent=2, ensure_ascii=False))
+        print(json.dumps(pipeline.loader.get_database_stats(), indent=2, ensure_ascii=False))
     except Exception as e:
-        print(f"Could not get database info: {e}", file=sys.stderr)
+        print(f"Error: {e}", file=sys.stderr)
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser(
         description="Voice Disorder Detection System",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__,
     )
-    parser.add_argument(
-        "--mode", choices=["binary", "multiclass"],
-        default="binary",
-        help="Classification mode (default: binary)",
-    )
-    parser.add_argument(
-        "--dbdir", default=None,
-        help="Database directory (default: system data dir)",
-    )
-    parser.add_argument(
-        "-v", "--verbose", action="store_true",
-        help="Verbose logging",
-    )
+    parser.add_argument("--mode", choices=["binary", "multiclass"], default="binary")
+    parser.add_argument("--backend", choices=["ensemble", "logreg", "cnn"], default="ensemble")
+    parser.add_argument("--dbdir", default=None)
+    parser.add_argument("-v", "--verbose", action="store_true")
 
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+    sub = parser.add_subparsers(dest="command")
 
-    # train
-    p_train = subparsers.add_parser("train", help="Train the model")
-    p_train.add_argument("--max-samples", type=int, default=None)
-    p_train.add_argument("--no-cache", action="store_true")
+    p = sub.add_parser("train")
+    p.add_argument("--max-samples", type=int)
+    p.add_argument("--no-cache", action="store_true")
+    p.add_argument("--augment", action="store_true", help="Enable data augmentation")
 
-    # predict
-    p_predict = subparsers.add_parser("predict", help="Predict voice disorder")
-    p_predict.add_argument("--file", type=str, help="Path to audio file")
-    p_predict.add_argument("--session", type=int, help="Database session ID")
+    p = sub.add_parser("predict")
+    p.add_argument("--file", type=str)
+    p.add_argument("--session", type=int)
 
-    # feedback
-    p_fb = subparsers.add_parser("feedback", help="Submit a correction")
-    p_fb.add_argument("--session", type=int, required=True)
-    p_fb.add_argument("--label", type=int, required=True)
-    p_fb.add_argument("--note", type=str, default="")
+    p = sub.add_parser("compare-baselines")
+    p.add_argument("--max-samples", type=int)
 
-    # apply-feedback
-    p_afb = subparsers.add_parser("apply-feedback", help="Apply corrections")
-    p_afb.add_argument("--full-retrain", action="store_true")
+    p = sub.add_parser("feedback")
+    p.add_argument("--session", type=int, required=True)
+    p.add_argument("--label", type=int, required=True)
+    p.add_argument("--note", type=str, default="")
 
-    # self-test
-    p_st = subparsers.add_parser("self-test", help="Run self-tests")
-    p_st.add_argument(
-        "--type", choices=["full", "cv", "quick"], default="full",
-    )
-    p_st.add_argument("--max-samples", type=int, default=None)
+    p = sub.add_parser("apply-feedback")
+    p.add_argument("--full-retrain", action="store_true")
 
-    # optimize
-    p_opt = subparsers.add_parser("optimize", help="Optimize hyperparameters")
-    p_opt.add_argument("--max-samples", type=int, default=None)
-    p_opt.add_argument("--iterations", type=int, default=20)
+    p = sub.add_parser("self-test")
+    p.add_argument("--type", choices=["full", "cv", "quick", "subgroups"], default="full")
+    p.add_argument("--max-samples", type=int)
 
-    # status
-    subparsers.add_parser("status", help="Show system status")
+    p = sub.add_parser("optimize")
+    p.add_argument("--max-samples", type=int)
+    p.add_argument("--iterations", type=int, default=20)
 
-    # db-info
-    subparsers.add_parser("db-info", help="Show database info")
+    p = sub.add_parser("explain")
+    p.add_argument("--max-samples", type=int)
+
+    sub.add_parser("status")
+    sub.add_parser("db-info")
 
     args = parser.parse_args()
     setup_logging(args.verbose)
@@ -293,22 +235,14 @@ def main() -> None:
         parser.print_help()
         sys.exit(0)
 
-    commands = {
-        "train": cmd_train,
-        "predict": cmd_predict,
-        "feedback": cmd_feedback,
-        "apply-feedback": cmd_apply_feedback,
-        "self-test": cmd_self_test,
-        "optimize": cmd_optimize,
-        "status": cmd_status,
-        "db-info": cmd_db_info,
+    cmds = {
+        "train": cmd_train, "predict": cmd_predict,
+        "compare-baselines": cmd_compare, "feedback": cmd_feedback,
+        "apply-feedback": cmd_apply_feedback, "self-test": cmd_self_test,
+        "optimize": cmd_optimize, "explain": cmd_explain,
+        "status": cmd_status, "db-info": cmd_db_info,
     }
-
-    cmd_func = commands.get(args.command)
-    if cmd_func:
-        cmd_func(args)
-    else:
-        parser.print_help()
+    cmds.get(args.command, lambda _: parser.print_help())(args)
 
 
 if __name__ == "__main__":

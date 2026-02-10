@@ -1,7 +1,8 @@
 """High-level pipeline that ties together all components.
 
 Provides a single interface for training, prediction, feedback,
-self-testing, SHAP analysis, and baseline comparison.
+self-testing, SHAP analysis, baseline comparison, calibration,
+domain monitoring, and reproducible report generation.
 """
 
 import logging
@@ -11,6 +12,7 @@ import numpy as np
 
 from . import config
 from .data_loader import VoiceDataLoader
+from .domain_monitor import DomainMonitor
 from .feature_extractor import extract_all_features
 from .feedback import FeedbackManager
 from .model import VoiceDisorderModel
@@ -34,6 +36,7 @@ class VoiceDisorderPipeline:
         self.model = VoiceDisorderModel(mode=mode, backend=backend)
         self.tester = SelfTester(self.model)
         self.feedback = FeedbackManager(self.model)
+        self.domain_monitor = DomainMonitor()
         self._loader = None
         self._dbdir = dbdir
         self._download_mode = download_mode
@@ -74,6 +77,14 @@ class VoiceDisorderPipeline:
                 for k in ["accuracy", "sensitivity", "specificity", "f1_weighted",
                            "auc_roc", "pr_auc", "brier_score", "ece", "split"]
             }
+
+        # Fit domain monitor on training distribution
+        try:
+            self.domain_monitor.fit(X)
+            self.domain_monitor.save()
+            result["domain_monitor"] = "fitted"
+        except Exception as e:
+            logger.warning("Failed to fit domain monitor: %s", e)
 
         model_path = self.model.save()
         result["model_path"] = str(model_path)
@@ -126,11 +137,31 @@ class VoiceDisorderPipeline:
     # ---- Prediction ----
 
     def predict_from_audio(self, audio: np.ndarray, sr: int) -> dict:
-        """Predict with abstain support."""
+        """Predict with abstain support and optional OOD warning."""
         self._ensure_model_loaded()
         features = extract_all_features(audio, sr)
         results = self.model.predict_with_confidence(features.reshape(1, -1))
-        return results[0]
+        prediction = results[0]
+
+        # Attach OOD warning if domain monitor is available
+        if self.domain_monitor.is_fitted:
+            ood = self.domain_monitor.check_ood(features.reshape(1, -1))[0]
+            prediction["ood_warning"] = ood["ood"]
+            if ood["ood"]:
+                prediction["ood_detail"] = ood
+        elif DomainMonitor is not None:
+            from .domain_monitor import MONITOR_FILE
+            if MONITOR_FILE.exists():
+                try:
+                    self.domain_monitor.load()
+                    ood = self.domain_monitor.check_ood(features.reshape(1, -1))[0]
+                    prediction["ood_warning"] = ood["ood"]
+                    if ood["ood"]:
+                        prediction["ood_detail"] = ood
+                except Exception:
+                    pass
+
+        return prediction
 
     def predict_from_file(self, audio_path: str) -> dict:
         """Predict from an audio file."""
@@ -237,6 +268,97 @@ class VoiceDisorderPipeline:
         )
         return compute_shap_values(self.model, X)
 
+    # ---- Calibration & Threshold Optimization ----
+
+    def calibrate(
+        self,
+        max_samples: Optional[int] = None,
+        method: str = "isotonic",
+    ) -> dict:
+        """Run post-hoc calibration and threshold optimization."""
+        from .calibration import calibrate_model
+
+        X, y, _, speaker_ids, _ = self.loader.extract_dataset(
+            mode=self.mode, max_samples=max_samples, use_cache=True,
+        )
+        return calibrate_model(
+            self.model, X, y, speaker_ids=speaker_ids, method=method,
+        )
+
+    # ---- Domain Monitoring ----
+
+    def fit_domain_monitor(self, max_samples: Optional[int] = None) -> dict:
+        """Fit domain monitor on training data distribution."""
+        X, y, _, _, _ = self.loader.extract_dataset(
+            mode=self.mode, max_samples=max_samples, use_cache=True,
+        )
+        self.domain_monitor.fit(X)
+        monitor_path = self.domain_monitor.save()
+        return {
+            "status": "fitted",
+            "n_samples": int(X.shape[0]),
+            "n_features": int(X.shape[1]),
+            "mahalanobis_threshold": self.domain_monitor._maha_threshold,
+            "monitor_file": str(monitor_path),
+        }
+
+    def check_drift(self, max_samples: Optional[int] = None) -> dict:
+        """Check for distribution drift against training data.
+
+        Loads the saved domain monitor and compares current data batch.
+        """
+        self._ensure_domain_monitor()
+        X, y, _, _, _ = self.loader.extract_dataset(
+            mode=self.mode, max_samples=max_samples, use_cache=True,
+        )
+        return self.domain_monitor.check_drift(X)
+
+    def check_ood_sample(self, audio: np.ndarray, sr: int) -> dict:
+        """Check if a single audio sample is out-of-distribution."""
+        self._ensure_domain_monitor()
+        features = extract_all_features(audio, sr)
+        ood_results = self.domain_monitor.check_ood(features.reshape(1, -1))
+        return ood_results[0]
+
+    # ---- Reproducible Report ----
+
+    def generate_report(
+        self,
+        max_samples: Optional[int] = None,
+        output_dir: Optional[str] = None,
+    ) -> dict:
+        """Generate a full reproducible evaluation report (JSON + Markdown)."""
+        from .calibration import calibrate_model
+        from .report_generator import generate_report as _gen
+
+        X, y, _, speaker_ids, metadata = self.loader.extract_dataset(
+            mode=self.mode, max_samples=max_samples, use_cache=True,
+        )
+
+        # Train model for evaluation
+        self.model.train(X, y, speaker_ids=speaker_ids)
+
+        # Run calibration
+        cal_results = None
+        try:
+            cal_results = calibrate_model(
+                self.model, X, y, speaker_ids=speaker_ids,
+            )
+        except Exception as e:
+            logger.warning("Calibration failed during report generation: %s", e)
+
+        from pathlib import Path
+        out_dir = Path(output_dir) if output_dir else None
+
+        return _gen(
+            model=self.model,
+            X=X, y=y,
+            speaker_ids=speaker_ids,
+            metadata=metadata,
+            output_dir=out_dir,
+            calibration_results=cal_results,
+        )
+
     # ---- Status ----
 
     def status(self) -> dict:
@@ -264,3 +386,13 @@ class VoiceDisorderPipeline:
                 self.model.load()
             else:
                 raise RuntimeError("No trained model available. Run 'train' first.")
+
+    def _ensure_domain_monitor(self) -> None:
+        if not self.domain_monitor.is_fitted:
+            from .domain_monitor import MONITOR_FILE
+            if MONITOR_FILE.exists():
+                self.domain_monitor.load()
+            else:
+                raise RuntimeError(
+                    "Domain monitor not fitted. Run 'fit-monitor' first."
+                )

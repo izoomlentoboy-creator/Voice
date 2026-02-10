@@ -11,6 +11,10 @@ Usage:
     python main.py self-test [--type full|cv|quick|subgroups] [--max-samples N]
     python main.py optimize [--max-samples N] [--iterations N]
     python main.py explain [--max-samples N]
+    python main.py calibrate [--method isotonic|sigmoid] [--max-samples N]
+    python main.py fit-monitor [--max-samples N]
+    python main.py check-drift [--max-samples N]
+    python main.py report [--max-samples N] [--output-dir DIR]
     python main.py status
     python main.py db-info
 """
@@ -169,6 +173,74 @@ def cmd_explain(args):
     print(json.dumps(result, indent=2))
 
 
+def cmd_calibrate(args):
+    pipeline = VoiceDisorderPipeline(mode=args.mode, backend=args.backend, dbdir=args.dbdir)
+    result = pipeline.calibrate(max_samples=args.max_samples, method=args.method)
+    print("\n" + "=" * 60)
+    print("CALIBRATION RESULTS")
+    print("=" * 60)
+    print(f"  Method:           {result['method']}")
+    print(f"  ECE before:       {result['ece_before']:.4f}")
+    print(f"  ECE after:        {result['ece_after']:.4f}")
+    print(f"  ECE improvement:  {result['ece_improvement']:.4f}")
+    print(f"  MCE before:       {result['mce_before']:.4f}")
+    print(f"  MCE after:        {result['mce_after']:.4f}")
+    thresholds = result.get("threshold_optimization", {})
+    if thresholds:
+        print("\n  Optimal Thresholds:")
+        for criterion, vals in thresholds.items():
+            if isinstance(vals, dict) and "threshold" in vals:
+                print(f"    {criterion}: threshold={vals['threshold']:.3f}"
+                      f"  sens={vals.get('sensitivity', 0):.4f}"
+                      f"  spec={vals.get('specificity', 0):.4f}")
+
+
+def cmd_fit_monitor(args):
+    pipeline = VoiceDisorderPipeline(mode=args.mode, backend=args.backend, dbdir=args.dbdir)
+    result = pipeline.fit_domain_monitor(max_samples=args.max_samples)
+    print("\n" + "=" * 60)
+    print("DOMAIN MONITOR FITTED")
+    print("=" * 60)
+    print(json.dumps(result, indent=2, default=str))
+
+
+def cmd_check_drift(args):
+    pipeline = VoiceDisorderPipeline(mode=args.mode, backend=args.backend, dbdir=args.dbdir)
+    result = pipeline.check_drift(max_samples=args.max_samples)
+    print("\n" + "=" * 60)
+    print("DRIFT CHECK RESULTS")
+    print("=" * 60)
+    print(f"  Drift detected: {result.get('drift_detected', 'n/a')}")
+    print(f"  Summary: {result.get('summary', 'n/a')}")
+    if result.get("per_feature"):
+        print(f"\n  Drifted features ({len(result['per_feature'])}):")
+        for f in result["per_feature"][:10]:
+            print(f"    feature[{f['feature_index']}]: KS p={f['ks_p_value']:.6f}, PSI={f['psi']:.4f}")
+
+
+def cmd_report(args):
+    pipeline = VoiceDisorderPipeline(mode=args.mode, backend=args.backend, dbdir=args.dbdir)
+    result = pipeline.generate_report(
+        max_samples=args.max_samples,
+        output_dir=args.output_dir,
+    )
+    print("\n" + "=" * 60)
+    print("EVALUATION REPORT GENERATED")
+    print("=" * 60)
+    files = result.get("_files", {})
+    print(f"  JSON:     {files.get('json', 'n/a')}")
+    print(f"  Markdown: {files.get('markdown', 'n/a')}")
+    ev = result.get("evaluation", {})
+    print(f"\n  Hold-out accuracy:     {ev.get('accuracy', 'n/a')}")
+    print(f"  Hold-out sensitivity:  {ev.get('sensitivity', 'n/a')}")
+    print(f"  Hold-out specificity:  {ev.get('specificity', 'n/a')}")
+    cv = result.get("cross_validation", {})
+    print(f"  CV accuracy (mean):    {cv.get('accuracy_mean', 'n/a')}")
+    cal = result.get("calibration", {})
+    if cal:
+        print(f"  ECE before/after:      {cal.get('ece_before', '?')} -> {cal.get('ece_after', '?')}")
+
+
 def cmd_status(args):
     pipeline = VoiceDisorderPipeline(mode=args.mode, backend=args.backend, dbdir=args.dbdir, download_mode="off")
     print(json.dumps(pipeline.status(), indent=2, default=str))
@@ -225,6 +297,20 @@ def main():
     p = sub.add_parser("explain")
     p.add_argument("--max-samples", type=int)
 
+    p = sub.add_parser("calibrate")
+    p.add_argument("--method", choices=["isotonic", "sigmoid"], default="isotonic")
+    p.add_argument("--max-samples", type=int)
+
+    p = sub.add_parser("fit-monitor")
+    p.add_argument("--max-samples", type=int)
+
+    p = sub.add_parser("check-drift")
+    p.add_argument("--max-samples", type=int)
+
+    p = sub.add_parser("report")
+    p.add_argument("--max-samples", type=int)
+    p.add_argument("--output-dir", type=str, default=None)
+
     sub.add_parser("status")
     sub.add_parser("db-info")
 
@@ -240,6 +326,8 @@ def main():
         "compare-baselines": cmd_compare, "feedback": cmd_feedback,
         "apply-feedback": cmd_apply_feedback, "self-test": cmd_self_test,
         "optimize": cmd_optimize, "explain": cmd_explain,
+        "calibrate": cmd_calibrate, "fit-monitor": cmd_fit_monitor,
+        "check-drift": cmd_check_drift, "report": cmd_report,
         "status": cmd_status, "db-info": cmd_db_info,
     }
     cmds.get(args.command, lambda _: parser.print_help())(args)

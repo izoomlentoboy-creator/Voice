@@ -47,8 +47,18 @@ def preprocess_audio(
     orig_sr: int,
     target_sr: int = config.SAMPLE_RATE,
 ) -> np.ndarray:
-    """Full preprocessing pipeline: convert, resample, trim, normalize."""
+    """Full preprocessing pipeline: convert, resample, trim, normalize.
+
+    Raises ValueError if the audio is too short to be meaningful.
+    """
     audio = audio_to_float(audio)
+
+    # Minimum 10 samples needed for resampling (scipy interpolation width=9)
+    if len(audio) < 10:
+        raise ValueError(
+            f"Audio too short for processing ({len(audio)} samples)"
+        )
+
     audio = resample_audio(audio, orig_sr, target_sr)
     audio = trim_silence(audio)
     audio = normalize_audio(audio)

@@ -147,7 +147,7 @@ class VoiceDataLoader:
                 except Exception:
                     audio = None
 
-                if audio is None or len(audio) == 0:
+                if audio is None or len(audio) < 100:
                     continue
 
                 try:

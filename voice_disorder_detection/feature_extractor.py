@@ -61,6 +61,16 @@ def preprocess_audio(
 
     audio = resample_audio(audio, orig_sr, target_sr)
     audio = trim_silence(audio)
+
+    # After trimming silence, audio may be too short for feature extraction.
+    # Need at least ~0.1s of signal for meaningful features.
+    min_after_trim = max(target_sr // 10, 10)
+    if len(audio) < min_after_trim:
+        raise ValueError(
+            f"Audio too short after silence trimming ({len(audio)} samples, "
+            f"need at least {min_after_trim})"
+        )
+
     audio = normalize_audio(audio)
     return audio
 
@@ -81,9 +91,11 @@ def extract_mfcc_features(audio: np.ndarray, sr: int) -> np.ndarray:
         n_fft=config.N_FFT, hop_length=config.HOP_LENGTH,
     )
 
-    # Use 'nearest' mode for short audio where interp width exceeds frame count
+    # Use 'nearest' mode for short audio where interp width exceeds frame count.
+    # librosa.feature.delta requires width <= n_frames for mode='interp',
+    # so use 'nearest' when frames are at or below the default width of 9.
     n_frames = mfccs.shape[1]
-    if n_frames < 9:
+    if n_frames <= 9:
         delta_kwargs = {"mode": "nearest"}
     else:
         delta_kwargs = {}

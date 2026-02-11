@@ -90,6 +90,7 @@ class VoiceDataLoader:
         X_list, y_list, session_ids, speaker_ids = [], [], [], []
         metadata_list = []
         pathology_map = {}
+        skipped_count = 0
 
         count = 0
         for session in self.db.iter_sessions():
@@ -174,7 +175,8 @@ class VoiceDataLoader:
                         except Exception:
                             pass
                 except Exception as e:
-                    logger.warning(
+                    skipped_count += 1
+                    logger.debug(
                         "Feature extraction failed for recording %d: %s",
                         rec.id, e,
                     )
@@ -202,6 +204,9 @@ class VoiceDataLoader:
             if count % 50 == 0:
                 gc.collect()
                 logger.info("Processed %d sessions...", count)
+
+        if skipped_count > 0:
+            logger.info("Skipped %d recordings (too short for feature extraction)", skipped_count)
 
         if not X_list:
             raise RuntimeError(

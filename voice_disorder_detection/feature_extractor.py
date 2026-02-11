@@ -80,8 +80,16 @@ def extract_mfcc_features(audio: np.ndarray, sr: int) -> np.ndarray:
         y=audio, sr=sr, n_mfcc=config.N_MFCC,
         n_fft=config.N_FFT, hop_length=config.HOP_LENGTH,
     )
-    mfcc_delta = librosa.feature.delta(mfccs)
-    mfcc_delta2 = librosa.feature.delta(mfccs, order=2)
+
+    # Use 'nearest' mode for short audio where interp width exceeds frame count
+    n_frames = mfccs.shape[1]
+    if n_frames < 9:
+        delta_kwargs = {"mode": "nearest"}
+    else:
+        delta_kwargs = {}
+
+    mfcc_delta = librosa.feature.delta(mfccs, **delta_kwargs)
+    mfcc_delta2 = librosa.feature.delta(mfccs, order=2, **delta_kwargs)
 
     all_coeffs = np.vstack([mfccs, mfcc_delta, mfcc_delta2])
     return _aggregate_over_time(all_coeffs)

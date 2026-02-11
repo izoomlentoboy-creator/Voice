@@ -75,7 +75,7 @@ class VoiceDisorderModel:
         rf = RandomForestClassifier(
             n_estimators=200, max_depth=None, min_samples_split=5,
             class_weight="balanced", random_state=config.RANDOM_STATE,
-            n_jobs=-1,
+            n_jobs=1,
         )
         gb = GradientBoostingClassifier(
             n_estimators=200, learning_rate=0.1, max_depth=5,
@@ -83,7 +83,7 @@ class VoiceDisorderModel:
         )
         return VotingClassifier(
             estimators=[("svm", svm), ("rf", rf), ("gb", gb)],
-            voting="soft", n_jobs=-1,
+            voting="soft", n_jobs=1,
         )
 
     def train(

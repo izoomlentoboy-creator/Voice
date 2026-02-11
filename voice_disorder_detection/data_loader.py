@@ -116,6 +116,7 @@ class VoiceDataLoader:
                 else:
                     pathologies = session_full.pathologies
                     if not pathologies:
+                        del session_full
                         continue
                     pname = pathologies[0].name
                     if pname not in pathology_map:
@@ -149,6 +150,7 @@ class VoiceDataLoader:
                     audio = None
 
                 if audio is None or len(audio) < 100:
+                    del rec_full
                     continue
 
                 try:
@@ -187,6 +189,7 @@ class VoiceDataLoader:
 
             if not session_features:
                 del session_full
+                gc.collect()
                 continue
 
             # Original sample
@@ -199,9 +202,10 @@ class VoiceDataLoader:
             count += 1
 
             # Free session data
-            del session_features, session_full, sample_meta
+            del session_features, combined, session_full, sample_meta
 
-            if count % 50 == 0:
+            # Aggressive GC every 10 sessions for low-memory servers
+            if count % 10 == 0:
                 gc.collect()
                 logger.info("Processed %d sessions...", count)
 

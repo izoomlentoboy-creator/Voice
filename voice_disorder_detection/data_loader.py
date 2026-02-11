@@ -149,7 +149,7 @@ class VoiceDataLoader:
                 except Exception:
                     audio = None
 
-                if audio is None or len(audio) < 100:
+                if audio is None or len(audio) < 2048:
                     del rec_full
                     continue
 

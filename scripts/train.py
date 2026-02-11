@@ -13,6 +13,12 @@ import json
 import logging
 import os
 import sys
+import warnings
+
+# Suppress librosa warnings about short audio signals
+warnings.filterwarnings("ignore", message=".*n_fft.*is too large.*")
+warnings.filterwarnings("ignore", message=".*Trying to estimate tuning.*")
+warnings.filterwarnings("ignore", category=UserWarning, module="librosa")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

@@ -4,12 +4,16 @@ Converts raw audio signals into feature vectors suitable for classification.
 Extracts spectral, cepstral, temporal, and prosodic features.
 """
 
+import warnings
 from typing import Optional
 
 import librosa
 import numpy as np
 
 from . import config
+
+# Suppress librosa warnings for short audio segments
+warnings.filterwarnings("ignore", category=UserWarning, module="librosa")
 
 
 def audio_to_float(audio: np.ndarray) -> np.ndarray:
@@ -53,10 +57,10 @@ def preprocess_audio(
     """
     audio = audio_to_float(audio)
 
-    # Minimum 10 samples needed for resampling (scipy interpolation width=9)
-    if len(audio) < 10:
+    # Minimum samples needed: N_FFT for meaningful spectral analysis
+    if len(audio) < config.N_FFT:
         raise ValueError(
-            f"Audio too short for processing ({len(audio)} samples)"
+            f"Audio too short for processing ({len(audio)} samples, need {config.N_FFT})"
         )
 
     audio = resample_audio(audio, orig_sr, target_sr)

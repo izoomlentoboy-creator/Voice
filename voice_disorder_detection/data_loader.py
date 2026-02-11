@@ -90,6 +90,7 @@ class VoiceDataLoader:
         X_list, y_list, session_ids, speaker_ids = [], [], [], []
         metadata_list = []
         pathology_map = {}
+        skipped_count = 0
 
         count = 0
         for session in self.db.iter_sessions():
@@ -115,6 +116,7 @@ class VoiceDataLoader:
                 else:
                     pathologies = session_full.pathologies
                     if not pathologies:
+                        del session_full
                         continue
                     pname = pathologies[0].name
                     if pname not in pathology_map:
@@ -147,7 +149,8 @@ class VoiceDataLoader:
                 except Exception:
                     audio = None
 
-                if audio is None or len(audio) < 100:
+                if audio is None or len(audio) < 2048:
+                    del rec_full
                     continue
 
                 try:
@@ -174,7 +177,8 @@ class VoiceDataLoader:
                         except Exception:
                             pass
                 except Exception as e:
-                    logger.warning(
+                    skipped_count += 1
+                    logger.debug(
                         "Feature extraction failed for recording %d: %s",
                         rec.id, e,
                     )
@@ -185,6 +189,7 @@ class VoiceDataLoader:
 
             if not session_features:
                 del session_full
+                gc.collect()
                 continue
 
             # Original sample
@@ -197,11 +202,15 @@ class VoiceDataLoader:
             count += 1
 
             # Free session data
-            del session_features, session_full, sample_meta
+            del session_features, combined, session_full, sample_meta
 
-            if count % 50 == 0:
+            # Aggressive GC every 10 sessions for low-memory servers
+            if count % 10 == 0:
                 gc.collect()
                 logger.info("Processed %d sessions...", count)
+
+        if skipped_count > 0:
+            logger.info("Skipped %d recordings (too short for feature extraction)", skipped_count)
 
         if not X_list:
             raise RuntimeError(

@@ -4,12 +4,16 @@ Converts raw audio signals into feature vectors suitable for classification.
 Extracts spectral, cepstral, temporal, and prosodic features.
 """
 
+import warnings
 from typing import Optional
 
 import librosa
 import numpy as np
 
 from . import config
+
+# Suppress librosa warnings for short audio segments
+warnings.filterwarnings("ignore", category=UserWarning, module="librosa")
 
 
 def audio_to_float(audio: np.ndarray) -> np.ndarray:
@@ -53,14 +57,24 @@ def preprocess_audio(
     """
     audio = audio_to_float(audio)
 
-    # Minimum 10 samples needed for resampling (scipy interpolation width=9)
-    if len(audio) < 10:
+    # Minimum samples needed: N_FFT for meaningful spectral analysis
+    if len(audio) < config.N_FFT:
         raise ValueError(
-            f"Audio too short for processing ({len(audio)} samples)"
+            f"Audio too short for processing ({len(audio)} samples, need {config.N_FFT})"
         )
 
     audio = resample_audio(audio, orig_sr, target_sr)
     audio = trim_silence(audio)
+
+    # After trimming silence, audio may be too short for feature extraction.
+    # Need at least ~0.1s of signal for meaningful features.
+    min_after_trim = max(target_sr // 10, 10)
+    if len(audio) < min_after_trim:
+        raise ValueError(
+            f"Audio too short after silence trimming ({len(audio)} samples, "
+            f"need at least {min_after_trim})"
+        )
+
     audio = normalize_audio(audio)
     return audio
 
@@ -80,8 +94,18 @@ def extract_mfcc_features(audio: np.ndarray, sr: int) -> np.ndarray:
         y=audio, sr=sr, n_mfcc=config.N_MFCC,
         n_fft=config.N_FFT, hop_length=config.HOP_LENGTH,
     )
-    mfcc_delta = librosa.feature.delta(mfccs)
-    mfcc_delta2 = librosa.feature.delta(mfccs, order=2)
+
+    # Use 'nearest' mode for short audio where interp width exceeds frame count.
+    # librosa.feature.delta requires width <= n_frames for mode='interp',
+    # so use 'nearest' when frames are at or below the default width of 9.
+    n_frames = mfccs.shape[1]
+    if n_frames <= 9:
+        delta_kwargs = {"mode": "nearest"}
+    else:
+        delta_kwargs = {}
+
+    mfcc_delta = librosa.feature.delta(mfccs, **delta_kwargs)
+    mfcc_delta2 = librosa.feature.delta(mfccs, order=2, **delta_kwargs)
 
     all_coeffs = np.vstack([mfccs, mfcc_delta, mfcc_delta2])
     return _aggregate_over_time(all_coeffs)

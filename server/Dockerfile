@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r /app/server/requirements.txt
 # Copy ML package, CLI, and server
 COPY voice_disorder_detection/ /app/voice_disorder_detection/
 COPY main.py /app/main.py
+COPY scripts/ /app/scripts/
 COPY server/ /app/server/
 
 # Create models directory (trained models will be mounted via volume)

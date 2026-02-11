@@ -19,14 +19,17 @@ COPY voice_disorder_detection/ /app/voice_disorder_detection/
 COPY main.py /app/main.py
 COPY server/ /app/server/
 
-# Create models directory (trained models will be mounted via volume)
-RUN mkdir -p /app/models
+# Create persistent directories
+RUN mkdir -p /app/models /app/cache /app/feedback /app/logs
 
 # Working directory
 WORKDIR /app
 
 ENV PYTHONPATH=/app
 ENV TBVOICE_DATABASE_URL=sqlite:///./server/tbvoice.db
+
+# Declare volumes for data persistence
+VOLUME ["/app/models", "/app/cache", "/root/.local/share/sbvoicedb"]
 
 EXPOSE 8000
 

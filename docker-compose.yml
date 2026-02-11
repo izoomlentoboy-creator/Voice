@@ -8,9 +8,14 @@ services:
     ports:
       - "${TBVOICE_PORT:-8000}:8000"
     volumes:
-      # Persist database and models across restarts
+      # Persist SQLite database across restarts
       - tbvoice-data:/app/server
-      - ./models:/app/models
+      # Persist trained models
+      - tbvoice-models:/app/models
+      # Persist sbvoicedb audio data (17+ GB) across restarts
+      - tbvoice-sbvoicedb:/root/.local/share/sbvoicedb
+      # Persist feature cache
+      - tbvoice-cache:/app/cache
     environment:
       - TBVOICE_DATABASE_URL=sqlite:///./server/tbvoice.db
       - TBVOICE_MODEL_BACKEND=${TBVOICE_MODEL_BACKEND:-ensemble}
@@ -26,3 +31,6 @@ services:
 
 volumes:
   tbvoice-data:
+  tbvoice-models:
+  tbvoice-sbvoicedb:
+  tbvoice-cache:

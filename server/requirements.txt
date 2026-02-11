@@ -12,5 +12,6 @@ scikit-learn>=1.3.0
 librosa>=0.10.0
 soundfile>=0.12.0
 joblib>=1.3.0
-sbvoicedb>=0.1.0
+sbvoicedb>=0.6.0
 python-dotenv>=1.0.0
+shap>=0.42.0

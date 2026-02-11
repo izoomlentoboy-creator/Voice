@@ -144,22 +144,19 @@ class VoiceDisorderPipeline:
         prediction = results[0]
 
         # Attach OOD warning if domain monitor is available
+        if not self.domain_monitor.is_fitted:
+            from .domain_monitor import MONITOR_FILE
+            if MONITOR_FILE.exists():
+                try:
+                    self.domain_monitor.load()
+                except Exception:
+                    pass
+
         if self.domain_monitor.is_fitted:
             ood = self.domain_monitor.check_ood(features.reshape(1, -1))[0]
             prediction["ood_warning"] = ood["ood"]
             if ood["ood"]:
                 prediction["ood_detail"] = ood
-        elif DomainMonitor is not None:
-            from .domain_monitor import MONITOR_FILE
-            if MONITOR_FILE.exists():
-                try:
-                    self.domain_monitor.load()
-                    ood = self.domain_monitor.check_ood(features.reshape(1, -1))[0]
-                    prediction["ood_warning"] = ood["ood"]
-                    if ood["ood"]:
-                        prediction["ood_detail"] = ood
-                except Exception:
-                    pass
 
         return prediction
 

@@ -28,9 +28,6 @@ _NAME_TO_IDX: dict[str, int] | None = None
 def _build_name_index() -> dict[str, int]:
     global _NAME_TO_IDX
     if _NAME_TO_IDX is None:
-        import sys
-        if str(next(iter(sys.path))) == "":
-            pass
         from voice_disorder_detection.feature_extractor import get_feature_names
         names = get_feature_names()
         _NAME_TO_IDX = {name: i for i, name in enumerate(names)}

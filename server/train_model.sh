@@ -1,6 +1,6 @@
 #!/bin/bash
 # Train the voice disorder detection model inside the Docker container
-# Usage: docker exec tbvoice_tbvoice_1 bash /app/server/train_model.sh
+# Usage: docker exec tbvoice bash /app/server/train_model.sh
 
 set -e
 
@@ -12,12 +12,12 @@ cd /app
 # Step 1: Train the ensemble model
 echo ""
 echo "[1/4] Training ensemble model..."
-python main.py train --backend ensemble
+python main.py --backend ensemble train
 
 # Step 2: Train logistic regression baseline
 echo ""
 echo "[2/4] Training logistic regression baseline..."
-python main.py train --backend logreg
+python main.py --backend logreg train
 
 # Step 3: Fit domain monitor for OOD detection
 echo ""

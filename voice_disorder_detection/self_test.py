@@ -72,11 +72,10 @@ class SelfTester:
             train_idx, test_idx = next(gss.split(X, y, groups))
             split_method = "patient_level"
         else:
-            n_test = max(1, int(len(y) * test_size))
-            indices = np.arange(len(y))
-            rng = np.random.RandomState(config.RANDOM_STATE)
-            rng.shuffle(indices)
-            train_idx, test_idx = indices[n_test:], indices[:n_test]
+            train_idx, test_idx = train_test_split(
+                np.arange(len(y)), test_size=test_size,
+                random_state=config.RANDOM_STATE, stratify=y,
+            )
             split_method = "stratified"
             logger.warning("No speaker_ids provided — using stratified split (risk of data leakage).")
 

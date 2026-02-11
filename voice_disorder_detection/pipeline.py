@@ -123,14 +123,9 @@ class VoiceDisorderPipeline:
                 "brier": cv["brier_mean"],
             }
 
-        # CNN baseline
-        try:
-
-            logger.info("Evaluating baseline: cnn (MLP on mel-spectrogram)")
-            # This requires re-extracting spectrograms — skip if too slow
-            results["cnn"] = {"note": "CNN baseline requires separate spectrogram extraction. Run with --backend cnn."}
-        except Exception:
-            pass
+        # CNN baseline (requires separate spectrogram extraction)
+        logger.info("Evaluating baseline: cnn (MLP on mel-spectrogram)")
+        results["cnn"] = {"note": "CNN baseline requires separate spectrogram extraction. Run with --backend cnn."}
 
         return results
 
@@ -149,7 +144,8 @@ class VoiceDisorderPipeline:
             prediction["ood_warning"] = ood["ood"]
             if ood["ood"]:
                 prediction["ood_detail"] = ood
-        elif DomainMonitor is not None:
+        else:
+            # Try loading persisted monitor from disk
             from .domain_monitor import MONITOR_FILE
             if MONITOR_FILE.exists():
                 try:

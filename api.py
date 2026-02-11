@@ -83,13 +83,21 @@ async def predict(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Could not read file: {e}")
 
     # Write to temp file for librosa
+    tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp.write(content)
-            tmp.flush()
-            audio, sr = librosa.load(tmp.name, sr=None)
+            tmp_path = tmp.name
+        audio, sr = librosa.load(tmp_path, sr=None)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not decode audio: {e}")
+    finally:
+        if tmp_path:
+            import os
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     if len(audio) < 1000:
         raise HTTPException(status_code=400, detail="Audio too short for analysis")

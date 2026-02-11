@@ -37,17 +37,21 @@ python scripts/infer.py --session 42
 ```
 Voice/
 ├── main.py                              # Full CLI (all commands)
-├── api.py                               # FastAPI inference server
+├── api.py                               # FastAPI inference server (simple)
 ├── requirements.txt
 ├── ruff.toml
+├── docker-compose.yml                   # Docker orchestration
 ├── scripts/
 │   ├── train.py                         # One-command training
 │   └── infer.py                         # One-command inference
 ├── tests/
 │   ├── test_feature_extractor.py
 │   ├── test_model.py
-│   └── test_self_test.py
-├── voice_disorder_detection/
+│   ├── test_self_test.py
+│   ├── test_calibration.py
+│   ├── test_domain_monitor.py
+│   └── test_report_generator.py
+├── voice_disorder_detection/            # Core ML package
 │   ├── config.py                        # All configuration
 │   ├── feature_extractor.py             # Audio -> 322-dim feature vector
 │   ├── augmentation.py                  # Noise, pitch shift, time stretch
@@ -56,8 +60,34 @@ Voice/
 │   ├── cnn_model.py                     # MLP on PCA-reduced mel-spectrogram
 │   ├── feedback.py                      # Online correction system
 │   ├── self_test.py                     # Patient-level eval, medical metrics, subgroups
+│   ├── calibration.py                   # Probability calibration + threshold optimization
+│   ├── domain_monitor.py               # OOD detection + feature drift monitoring
 │   ├── interpretability.py              # SHAP analysis
+│   ├── report_generator.py             # Reproducible evaluation reports
 │   └── pipeline.py                      # High-level orchestrator
+├── server/                              # Production FastAPI server (TBVoice)
+│   ├── Dockerfile
+│   ├── run.py                           # Local server runner
+│   ├── train_model.sh                   # Docker training script
+│   ├── generate_ref_stats.py            # Healthy population reference stats
+│   ├── app/
+│   │   ├── main.py                      # FastAPI app setup
+│   │   ├── config.py                    # Server configuration
+│   │   ├── models.py                    # SQLAlchemy ORM models
+│   │   ├── database.py                  # Database setup
+│   │   ├── schemas.py                   # Pydantic request/response schemas
+│   │   ├── routes/
+│   │   │   ├── analyze.py               # POST /analyze (3 vowel files)
+│   │   │   ├── feedback.py              # POST /feedback
+│   │   │   ├── health.py                # GET /health, GET /status
+│   │   │   └── history.py               # GET /history, GET /analysis
+│   │   └── services/
+│   │       ├── predictor.py             # ML prediction singleton
+│   │       ├── audio_processor.py       # Audio validation
+│   │       └── interpreter.py           # Feature → user-friendly categories
+│   └── tests/
+│       ├── test_api.py
+│       └── test_interpreter.py
 └── .github/workflows/ci.yml            # Lint + test
 ```
 
@@ -140,12 +170,28 @@ python main.py apply-feedback                            # apply accumulated cor
 # Interpretability
 python main.py explain                                   # SHAP feature importance
 
+# Calibration & threshold optimization
+python main.py calibrate                                 # isotonic calibration (default)
+python main.py calibrate --method sigmoid                # Platt scaling
+
+# Domain monitoring
+python main.py fit-monitor                               # fit OOD detector on training data
+python main.py check-drift                               # check feature distribution drift
+
+# Reproducible evaluation report
+python main.py report                                    # generates JSON + Markdown report
+python main.py report --output-dir ./my_reports
+
 # Optimization
 python main.py optimize --iterations 30
 
-# API server
+# Simple API server
 uvicorn api:app --host 0.0.0.0 --port 8000
 # then: curl -X POST http://localhost:8000/predict -F "file=@audio.wav"
+
+# Production server (TBVoice)
+python server/run.py                                     # local run
+docker compose up --build                                # Docker
 
 # Status
 python main.py status
@@ -155,8 +201,8 @@ python main.py db-info
 ## Testing
 
 ```bash
-# Run all tests
-pytest tests/ -v
+# Run all tests (core + server)
+pytest tests/ server/tests/ -v
 
 # Lint
 ruff check .

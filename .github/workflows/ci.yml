@@ -25,5 +25,5 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
-      - run: pip install pytest shap fastapi uvicorn python-multipart
-      - run: pytest tests/ -v --tb=short
+      - run: pip install pytest shap fastapi uvicorn python-multipart sqlalchemy aiofiles httpx
+      - run: pytest tests/ server/tests/ -v --tb=short

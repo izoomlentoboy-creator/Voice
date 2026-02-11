@@ -25,7 +25,13 @@ HOP_LENGTH = 512             # Hop length for STFT
 N_MELS = 128                 # Number of mel bands
 
 # Utterances to use for feature extraction (sustained vowels are most informative)
+# Normal pitch vowels only — sufficient for classification, 3x less memory
 UTTERANCES_FOR_TRAINING = [
+    "a_n", "i_n", "u_n",     # normal pitch
+]
+
+# Extended set (use with --utterances extended for more data, needs more RAM)
+UTTERANCES_EXTENDED = [
     "a_n", "i_n", "u_n",     # normal pitch
     "a_l", "i_l", "u_l",     # low pitch
     "a_h", "i_h", "u_h",     # high pitch

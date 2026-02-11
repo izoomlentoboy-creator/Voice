@@ -3,8 +3,12 @@
 Handles database initialization, audio loading, feature extraction,
 caching, and dataset preparation for training/evaluation.
 Key: tracks speaker_id for patient-level splitting.
+
+Memory-optimized: processes in batches with explicit garbage collection
+to work on servers with limited RAM (4 GB).
 """
 
+import gc
 import json
 import logging
 from typing import Optional
@@ -130,7 +134,6 @@ class VoiceDataLoader:
 
             # Extract features from each relevant recording
             session_features = []
-            session_audios = []  # keep raw audio for augmentation
             for rec in session_full.recordings:
                 if rec.utterance not in self.utterances:
                     continue
@@ -148,18 +151,40 @@ class VoiceDataLoader:
                     continue
 
                 try:
-                    feats = extract_all_features(audio, rec_full.rate)
+                    rate = rec_full.rate
+                    feats = extract_all_features(audio, rate)
                     session_features.append(feats)
+
+                    # Augmentation: process immediately, don't store raw audio
                     if augment:
-                        processed = preprocess_audio(audio, rec_full.rate)
-                        session_audios.append((processed, config.SAMPLE_RATE))
+                        processed = preprocess_audio(audio, rate)
+                        try:
+                            aug_versions = augment_audio(processed, config.SAMPLE_RATE)
+                            for aug_audio in aug_versions[:2]:
+                                aug_feats = extract_all_features(
+                                    aug_audio, config.SAMPLE_RATE, preprocess=False,
+                                )
+                                X_list.append(aug_feats)
+                                y_list.append(label)
+                                session_ids.append(session_full.id)
+                                speaker_ids.append(session_full.speaker_id)
+                                metadata_list.append({**sample_meta, "augmented": True})
+                                del aug_audio, aug_feats
+                            del aug_versions, processed
+                        except Exception:
+                            pass
                 except Exception as e:
                     logger.warning(
                         "Feature extraction failed for recording %d: %s",
                         rec.id, e,
                     )
+                finally:
+                    # Free audio memory immediately
+                    del audio
+                    del rec_full
 
             if not session_features:
+                del session_full
                 continue
 
             # Original sample
@@ -171,24 +196,11 @@ class VoiceDataLoader:
             metadata_list.append(sample_meta)
             count += 1
 
-            # Augmented samples (same speaker_id -> same group for splitting)
-            if augment and session_audios:
-                for audio_float, sr in session_audios[:2]:  # limit per session
-                    try:
-                        aug_versions = augment_audio(audio_float, sr)
-                        for aug_audio in aug_versions[:3]:  # limit augmentations
-                            aug_feats = extract_all_features(
-                                aug_audio, sr, preprocess=False,
-                            )
-                            X_list.append(aug_feats)
-                            y_list.append(label)
-                            session_ids.append(session_full.id)
-                            speaker_ids.append(session_full.speaker_id)
-                            metadata_list.append({**sample_meta, "augmented": True})
-                    except Exception:
-                        pass
+            # Free session data
+            del session_features, session_full, sample_meta
 
             if count % 50 == 0:
+                gc.collect()
                 logger.info("Processed %d sessions...", count)
 
         if not X_list:

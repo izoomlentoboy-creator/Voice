@@ -53,14 +53,23 @@ def preprocess_audio(
     """
     audio = audio_to_float(audio)
 
-    # Minimum 10 samples needed for resampling (scipy interpolation width=9)
-    if len(audio) < 10:
+    # scipy resample_poly requires at least max(up, down) * 9 samples
+    # to avoid "width cannot exceed data.shape[axis]" errors
+    min_resample_samples = max(orig_sr, target_sr) // min(orig_sr, target_sr) * 9 + 1
+    min_resample_samples = max(min_resample_samples, 100)
+    if len(audio) < min_resample_samples:
         raise ValueError(
-            f"Audio too short for processing ({len(audio)} samples)"
+            f"Audio too short for resampling ({len(audio)} samples, need {min_resample_samples})"
         )
 
     audio = resample_audio(audio, orig_sr, target_sr)
     audio = trim_silence(audio)
+
+    # After trimming, audio may be too short for feature extraction
+    min_post_trim = config.N_FFT + config.HOP_LENGTH
+    if len(audio) < min_post_trim:
+        audio = np.pad(audio, (0, min_post_trim - len(audio)), mode="constant")
+
     audio = normalize_audio(audio)
     return audio
 

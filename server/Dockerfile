@@ -18,8 +18,8 @@ RUN pip install --no-cache-dir -r /app/server/requirements.txt
 COPY voice_disorder_detection/ /app/voice_disorder_detection/
 COPY server/ /app/server/
 
-# Copy trained models if available
-COPY models/ /app/models/
+# Create models directory (trained models will be mounted via volume)
+RUN mkdir -p /app/models
 
 # Working directory
 WORKDIR /app

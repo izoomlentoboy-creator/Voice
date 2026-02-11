@@ -9,6 +9,17 @@ echo "Starting at $(date)"
 
 cd /app
 
+# Step 0: Download the sbvoicedb audio data
+echo ""
+echo "[0/4] Downloading voice database audio files..."
+python -c "
+from sbvoicedb import SbVoiceDb
+db = SbVoiceDb(download_mode='immediate')
+print(f'Total sessions: {db.number_of_all_sessions}')
+print(f'Downloaded: {db.number_of_sessions_downloaded}')
+print('Database ready.')
+"
+
 # Step 1: Train the ensemble model
 echo ""
 echo "[1/4] Training ensemble model..."

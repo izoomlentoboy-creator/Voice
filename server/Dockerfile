@@ -10,9 +10,12 @@ RUN apt-get update && \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-# Python deps
+# Python deps (install main requirements first for training support,
+# then server-specific ones)
+COPY requirements.txt /app/requirements.txt
 COPY server/requirements.txt /app/server/requirements.txt
-RUN pip install --no-cache-dir -r /app/server/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt \
+    -r /app/server/requirements.txt
 
 # Copy ML package, CLI, and server
 COPY voice_disorder_detection/ /app/voice_disorder_detection/

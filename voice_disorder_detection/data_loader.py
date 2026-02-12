@@ -87,6 +87,19 @@ class VoiceDataLoader:
                 logger.warning("Cache load failed: %s", e)
 
         logger.info("Extracting features (mode=%s, augment=%s)...", mode, augment)
+
+        # Trigger lazy download if data hasn't been fetched yet.
+        # sbvoicedb's lazy download only fires from recording-access methods
+        # (get_recording, iter_recordings), but we access recordings via the
+        # session relationship (get_session(query_recordings=True)).  The
+        # recordings table stays empty until audio files are downloaded, so we
+        # must trigger the download explicitly before iterating.
+        if self.db.lazy_download:
+            logger.info(
+                "Downloading voice database from Zenodo (first run)..."
+            )
+            self.db.download_data()
+
         X_list, y_list, session_ids, speaker_ids = [], [], [], []
         metadata_list = []
         pathology_map = {}
@@ -204,9 +217,12 @@ class VoiceDataLoader:
                 logger.info("Processed %d sessions...", count)
 
         if not X_list:
+            downloaded = self.db.number_of_sessions_downloaded
+            total = self.db.number_of_all_sessions
             raise RuntimeError(
-                "No features extracted. Ensure the database is downloaded "
-                "and contains accessible recordings."
+                f"No features extracted. Database has {total} sessions "
+                f"({downloaded} downloaded). Ensure the database audio files "
+                f"are downloaded and accessible (dbdir={self.dbdir or 'default'})."
             )
 
         X = np.vstack(X_list)

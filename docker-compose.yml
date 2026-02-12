@@ -9,6 +9,8 @@ services:
       # Persist database and models across restarts
       - tbvoice-data:/app/server
       - ./models:/app/models
+      # Persist sbvoicedb downloads so training data survives restarts
+      - sbvoicedb-cache:/root/.local/share/sbvoicedb
     environment:
       - TBVOICE_DATABASE_URL=sqlite:///./server/tbvoice.db
       - TBVOICE_MODEL_BACKEND=${TBVOICE_MODEL_BACKEND:-ensemble}
@@ -24,3 +26,4 @@ services:
 
 volumes:
   tbvoice-data:
+  sbvoicedb-cache:

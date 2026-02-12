@@ -56,7 +56,7 @@ app = FastAPI(
 # --- CORS (allow iOS app) ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict to app's domain
+    allow_origins=config.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -32,6 +32,13 @@ AUDIO_SAMPLE_RATE = 16000
 API_VERSION = "v1"
 API_PREFIX = f"/api/{API_VERSION}"
 
+# CORS — comma-separated allowed origins (e.g. "https://myapp.com,http://localhost:3000")
+# Empty or unset defaults to localhost-only for development.
+_cors_raw = os.environ.get("TBVOICE_CORS_ORIGINS", "")
+CORS_ORIGINS: list[str] = [
+    o.strip() for o in _cors_raw.split(",") if o.strip()
+] or ["http://localhost:3000", "http://localhost:8080"]
+
 # Rate limiting (requests per minute per user)
 RATE_LIMIT_PER_MINUTE = int(os.environ.get("TBVOICE_RATE_LIMIT", "10"))
 

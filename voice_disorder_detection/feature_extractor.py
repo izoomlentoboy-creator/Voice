@@ -14,6 +14,9 @@ from . import config
 
 def audio_to_float(audio: np.ndarray) -> np.ndarray:
     """Convert int16 audio to float32 in [-1.0, 1.0]."""
+    # sbvoicedb nspdata returns shape (N, 1) — flatten to 1-D
+    if audio.ndim > 1:
+        audio = audio.squeeze()
     if audio.dtype == np.int16:
         return audio.astype(np.float32) / 32768.0
     if audio.dtype in (np.float32, np.float64):

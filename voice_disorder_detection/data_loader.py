@@ -144,6 +144,9 @@ class VoiceDataLoader:
 
                 try:
                     audio = rec_full.nspdata
+                    # sbvoicedb nspdata returns shape (N, 1) — flatten to 1-D
+                    if audio is not None and audio.ndim > 1:
+                        audio = audio.squeeze()
                 except Exception:
                     audio = None
 

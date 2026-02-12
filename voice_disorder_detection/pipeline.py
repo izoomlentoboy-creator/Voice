@@ -58,15 +58,23 @@ class VoiceDisorderPipeline:
         use_cache: bool = True,
         run_evaluation: bool = True,
         augment: bool = False,
+        synthetic: bool = False,
     ) -> dict:
         """Full training pipeline with patient-level evaluation."""
         result = {}
         logger.info("=== Training pipeline (mode=%s, backend=%s) ===", self.mode, self.backend)
 
-        X, y, session_ids, speaker_ids, metadata = self.loader.extract_dataset(
-            mode=self.mode, max_samples=max_samples,
-            use_cache=use_cache, augment=augment,
-        )
+        if synthetic:
+            n_samples = max_samples or 500
+            X, y, session_ids, speaker_ids, metadata = self.loader.extract_synthetic_dataset(
+                mode=self.mode, n_samples=n_samples, use_cache=use_cache,
+            )
+            result["data_source"] = "synthetic"
+        else:
+            X, y, session_ids, speaker_ids, metadata = self.loader.extract_dataset(
+                mode=self.mode, max_samples=max_samples,
+                use_cache=use_cache, augment=augment,
+            )
         # Free loader reference to database to release memory
         del metadata
         gc.collect()

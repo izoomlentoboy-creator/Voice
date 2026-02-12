@@ -6,6 +6,7 @@ Usage:
     python scripts/train.py --backend logreg    # logistic regression baseline
     python scripts/train.py --augment           # with data augmentation
     python scripts/train.py --max-samples 200   # quick test run
+    python scripts/train.py --synthetic         # use synthetic data (no audio download needed)
 """
 
 import argparse
@@ -32,6 +33,8 @@ def main():
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--augment", action="store_true")
     parser.add_argument("--no-cache", action="store_true")
+    parser.add_argument("--synthetic", action="store_true",
+                        help="Use synthetic data (no audio download needed)")
     parser.add_argument("--dbdir", default=None)
     args = parser.parse_args()
 
@@ -43,6 +46,7 @@ def main():
         max_samples=args.max_samples,
         use_cache=not args.no_cache,
         augment=args.augment,
+        synthetic=args.synthetic,
     )
 
     print(json.dumps(result, indent=2, default=str))

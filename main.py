@@ -45,6 +45,7 @@ def cmd_train(args):
         max_samples=args.max_samples,
         use_cache=not args.no_cache,
         augment=args.augment,
+        synthetic=args.synthetic,
     )
     print("\n" + "=" * 60)
     print("TRAINING COMPLETE")
@@ -270,6 +271,8 @@ def main():
     p.add_argument("--max-samples", type=int)
     p.add_argument("--no-cache", action="store_true")
     p.add_argument("--augment", action="store_true", help="Enable data augmentation")
+    p.add_argument("--synthetic", action="store_true",
+                   help="Use synthetic data (no audio download needed)")
 
     p = sub.add_parser("predict")
     p.add_argument("--file", type=str)

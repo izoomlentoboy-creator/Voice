@@ -61,6 +61,16 @@ def preprocess_audio(
 
     audio = resample_audio(audio, orig_sr, target_sr)
     audio = trim_silence(audio)
+
+    # After trimming silence, audio may be too short for meaningful analysis.
+    # Need at least 9 STFT frames for HPSS median filter and MFCC delta.
+    min_analysis_samples = config.N_FFT + config.HOP_LENGTH * 8
+    if len(audio) < min_analysis_samples:
+        raise ValueError(
+            f"Audio too short after silence trimming ({len(audio)} samples, "
+            f"need {min_analysis_samples})"
+        )
+
     audio = normalize_audio(audio)
     return audio
 
@@ -221,8 +231,8 @@ def extract_all_features(
         audio = preprocess_audio(audio, orig_sr=sr, target_sr=config.SAMPLE_RATE)
         sr = config.SAMPLE_RATE
 
-    # Minimum length check
-    min_samples = config.N_FFT + config.HOP_LENGTH
+    # Minimum length: need at least 9 STFT frames for HPSS and delta
+    min_samples = config.N_FFT + config.HOP_LENGTH * 8
     if len(audio) < min_samples:
         audio = np.pad(audio, (0, min_samples - len(audio)))
 

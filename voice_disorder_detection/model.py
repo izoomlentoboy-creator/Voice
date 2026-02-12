@@ -73,17 +73,17 @@ class VoiceDisorderModel:
             class_weight="balanced",
         )
         rf = RandomForestClassifier(
-            n_estimators=200, max_depth=None, min_samples_split=5,
+            n_estimators=100, max_depth=None, min_samples_split=5,
             class_weight="balanced", random_state=config.RANDOM_STATE,
-            n_jobs=-1,
+            n_jobs=1,
         )
         gb = GradientBoostingClassifier(
-            n_estimators=200, learning_rate=0.1, max_depth=5,
+            n_estimators=100, learning_rate=0.1, max_depth=5,
             random_state=config.RANDOM_STATE,
         )
         return VotingClassifier(
             estimators=[("svm", svm), ("rf", rf), ("gb", gb)],
-            voting="soft", n_jobs=-1,
+            voting="soft", n_jobs=1,
         )
 
     def train(
@@ -94,6 +94,8 @@ class VoiceDisorderModel:
         speaker_ids: Optional[list[int]] = None,
     ) -> dict:
         """Train the model on extracted features."""
+        import gc
+
         logger.info(
             "Training %s model (backend=%s): %d samples, %d features",
             self.mode, self.backend, X.shape[0], X.shape[1],
@@ -106,6 +108,7 @@ class VoiceDisorderModel:
 
         self.model = self._build_model(n_classes)
         self.model.fit(X_scaled, y_encoded)
+        gc.collect()
 
         # Build incremental learner
         self._incremental_model = SGDClassifier(
@@ -113,6 +116,9 @@ class VoiceDisorderModel:
             random_state=config.RANDOM_STATE, warm_start=True,
         )
         self._incremental_model.fit(X_scaled, y_encoded)
+
+        del X_scaled, y_encoded
+        gc.collect()
 
         elapsed = time.time() - start_time
         self.is_trained = True

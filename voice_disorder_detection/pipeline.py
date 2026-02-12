@@ -5,6 +5,7 @@ self-testing, SHAP analysis, baseline comparison, calibration,
 domain monitoring, and reproducible report generation.
 """
 
+import gc
 import logging
 from typing import Optional
 
@@ -66,9 +67,13 @@ class VoiceDisorderPipeline:
             mode=self.mode, max_samples=max_samples,
             use_cache=use_cache, augment=augment,
         )
+        # Free loader reference to database to release memory
+        del metadata
+        gc.collect()
 
         train_meta = self.model.train(X, y, session_ids=session_ids, speaker_ids=speaker_ids)
         result["training"] = train_meta
+        gc.collect()
 
         if run_evaluation and len(X) >= 20:
             eval_result = self.tester.run_full_evaluation(X, y, speaker_ids=speaker_ids)
@@ -77,6 +82,8 @@ class VoiceDisorderPipeline:
                 for k in ["accuracy", "sensitivity", "specificity", "f1_weighted",
                            "auc_roc", "pr_auc", "brier_score", "ece", "split"]
             }
+            del eval_result
+            gc.collect()
 
         # Fit domain monitor on training distribution
         try:
@@ -85,6 +92,10 @@ class VoiceDisorderPipeline:
             result["domain_monitor"] = "fitted"
         except Exception as e:
             logger.warning("Failed to fit domain monitor: %s", e)
+
+        # Free large arrays before saving
+        del X, y, session_ids, speaker_ids
+        gc.collect()
 
         model_path = self.model.save()
         result["model_path"] = str(model_path)

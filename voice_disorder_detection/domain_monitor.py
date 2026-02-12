@@ -85,10 +85,10 @@ class DomainMonitor:
 
         # --- Isolation Forest ---
         self._iforest = IsolationForest(
-            n_estimators=200,
+            n_estimators=100,
             contamination=contamination,
             random_state=config.RANDOM_STATE,
-            n_jobs=-1,
+            n_jobs=1,
         )
         self._iforest.fit(X_train)
 

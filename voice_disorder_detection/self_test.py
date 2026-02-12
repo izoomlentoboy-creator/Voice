@@ -332,13 +332,13 @@ class SelfTester:
                           probability=True, class_weight="balanced", random_state=config.RANDOM_STATE)
                 rf = RandomForestClassifier(n_estimators=params["rf_n_estimators"],
                                             max_depth=params["rf_max_depth"], class_weight="balanced",
-                                            random_state=config.RANDOM_STATE, n_jobs=-1)
+                                            random_state=config.RANDOM_STATE, n_jobs=1)
                 gb = GradientBoostingClassifier(n_estimators=params["gb_n_estimators"],
                                                 learning_rate=params["gb_learning_rate"],
                                                 max_depth=params["gb_max_depth"],
                                                 random_state=config.RANDOM_STATE)
                 ensemble = VotingClassifier(estimators=[("svm", svm), ("rf", rf), ("gb", gb)],
-                                            voting="soft", n_jobs=-1)
+                                            voting="soft", n_jobs=1)
                 ensemble.fit(X_train_s, y_train_e)
                 score = f1_score(y_val_e, ensemble.predict(X_val_s), average="weighted")
                 if score > best_score:

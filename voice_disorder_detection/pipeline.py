@@ -11,6 +11,7 @@ from typing import Optional
 import numpy as np
 
 from . import config
+from .custom_data_loader import CustomZipDataLoader
 from .data_loader import VoiceDataLoader
 from .domain_monitor import DomainMonitor
 from .feature_extractor import extract_all_features
@@ -57,8 +58,20 @@ class VoiceDisorderPipeline:
         use_cache: bool = True,
         run_evaluation: bool = True,
         augment: bool = False,
+        extra_data: Optional[str] = None,
+        extra_data_label: Optional[int] = None,
     ) -> dict:
-        """Full training pipeline with patient-level evaluation."""
+        """Full training pipeline with patient-level evaluation.
+
+        Parameters
+        ----------
+        extra_data : str, optional
+            Path to a zip archive with additional audio files to include
+            in training. See CustomZipDataLoader for supported formats.
+        extra_data_label : int, optional
+            Default label (0=healthy, 1=pathological) for files in the
+            archive when no label info is available inside the zip.
+        """
         result = {}
         logger.info("=== Training pipeline (mode=%s, backend=%s) ===", self.mode, self.backend)
 
@@ -66,6 +79,15 @@ class VoiceDisorderPipeline:
             mode=self.mode, max_samples=max_samples,
             use_cache=use_cache, augment=augment,
         )
+
+        # Merge custom zip data if provided
+        if extra_data:
+            X, y, session_ids, speaker_ids, metadata = self._merge_custom_data(
+                X, y, session_ids, speaker_ids, metadata,
+                extra_data=extra_data,
+                default_label=extra_data_label,
+                augment=augment,
+            )
 
         train_meta = self.model.train(X, y, session_ids=session_ids, speaker_ids=speaker_ids)
         result["training"] = train_meta
@@ -374,6 +396,36 @@ class VoiceDisorderPipeline:
         except Exception as e:
             result["database"] = {"error": str(e)}
         return result
+
+    def _merge_custom_data(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        session_ids: list[int],
+        speaker_ids: list[int],
+        metadata: list[dict],
+        extra_data: str,
+        default_label: Optional[int] = None,
+        augment: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray, list[int], list[int], list[dict]]:
+        """Load custom zip data and merge with the main dataset."""
+        logger.info("Loading custom data from: %s", extra_data)
+        loader = CustomZipDataLoader(extra_data)
+        X_custom, y_custom, sid_custom, spk_custom, meta_custom = (
+            loader.extract_dataset(default_label=default_label, augment=augment)
+        )
+
+        X_merged = np.vstack([X, X_custom])
+        y_merged = np.concatenate([y, y_custom])
+        session_ids_merged = session_ids + sid_custom
+        speaker_ids_merged = speaker_ids + spk_custom
+        metadata_merged = metadata + meta_custom
+
+        logger.info(
+            "Merged dataset: %d base + %d custom = %d total samples",
+            X.shape[0], X_custom.shape[0], X_merged.shape[0],
+        )
+        return X_merged, y_merged, session_ids_merged, speaker_ids_merged, metadata_merged
 
     def _ensure_model_loaded(self) -> None:
         if not self.model.is_trained:

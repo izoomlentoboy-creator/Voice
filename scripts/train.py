@@ -33,6 +33,14 @@ def main():
     parser.add_argument("--augment", action="store_true")
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument("--dbdir", default=None)
+    parser.add_argument(
+        "--extra-data", type=str, default=None,
+        help="Path to a zip archive with additional audio files for training",
+    )
+    parser.add_argument(
+        "--extra-data-label", type=int, default=None, choices=[0, 1],
+        help="Default label for extra data (0=healthy, 1=pathological)",
+    )
     args = parser.parse_args()
 
     pipeline = VoiceDisorderPipeline(
@@ -43,6 +51,8 @@ def main():
         max_samples=args.max_samples,
         use_cache=not args.no_cache,
         augment=args.augment,
+        extra_data=args.extra_data,
+        extra_data_label=args.extra_data_label,
     )
 
     print(json.dumps(result, indent=2, default=str))

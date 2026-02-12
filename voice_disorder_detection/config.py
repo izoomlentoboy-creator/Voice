@@ -11,7 +11,9 @@ FEEDBACK_DIR = PROJECT_ROOT / "feedback"
 LOGS_DIR = PROJECT_ROOT / "logs"
 CACHE_DIR = PROJECT_ROOT / "cache"
 
-for d in (DATA_DIR, MODELS_DIR, FEEDBACK_DIR, LOGS_DIR, CACHE_DIR):
+CUSTOM_DATA_DIR = PROJECT_ROOT / "custom_data"
+
+for d in (DATA_DIR, MODELS_DIR, FEEDBACK_DIR, LOGS_DIR, CACHE_DIR, CUSTOM_DATA_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
 # --- Database ---

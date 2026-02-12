@@ -2,7 +2,7 @@
 """Voice Disorder Detection System — CLI entry point.
 
 Usage:
-    python main.py train [--backend ensemble|logreg] [--augment] [--max-samples N]
+    python main.py train [--backend ensemble|logreg] [--augment] [--max-samples N] [--extra-data FILE.zip] [--extra-data-label 0|1]
     python main.py predict --file <audio_path>
     python main.py predict --session <session_id>
     python main.py compare-baselines [--max-samples N]
@@ -45,6 +45,8 @@ def cmd_train(args):
         max_samples=args.max_samples,
         use_cache=not args.no_cache,
         augment=args.augment,
+        extra_data=args.extra_data,
+        extra_data_label=args.extra_data_label,
     )
     print("\n" + "=" * 60)
     print("TRAINING COMPLETE")
@@ -270,6 +272,15 @@ def main():
     p.add_argument("--max-samples", type=int)
     p.add_argument("--no-cache", action="store_true")
     p.add_argument("--augment", action="store_true", help="Enable data augmentation")
+    p.add_argument(
+        "--extra-data", type=str, default=None,
+        help="Path to a zip archive with additional audio files for training",
+    )
+    p.add_argument(
+        "--extra-data-label", type=int, default=None, choices=[0, 1],
+        help="Default label for extra data (0=healthy, 1=pathological) "
+             "when archive has no label info",
+    )
 
     p = sub.add_parser("predict")
     p.add_argument("--file", type=str)

@@ -86,12 +86,17 @@ class VoiceDataLoader:
             except Exception as e:
                 logger.warning("Cache load failed: %s", e)
 
-        logger.info("Extracting features (mode=%s, augment=%s)...", mode, augment)
+        total_sessions = self.db.number_of_sessions_downloaded
+        logger.info(
+            "Extracting features (mode=%s, augment=%s) from %d sessions...",
+            mode, augment, total_sessions,
+        )
         X_list, y_list, session_ids, speaker_ids = [], [], [], []
         metadata_list = []
         pathology_map = {}
 
         count = 0
+        skipped = 0
         for session in self.db.iter_sessions():
             if max_samples and count >= max_samples:
                 break
@@ -184,6 +189,7 @@ class VoiceDataLoader:
                     del rec_full
 
             if not session_features:
+                skipped += 1
                 del session_full
                 continue
 
@@ -199,9 +205,12 @@ class VoiceDataLoader:
             # Free session data
             del session_features, session_full, sample_meta
 
-            if count % 50 == 0:
+            if count % 10 == 0:
                 gc.collect()
-                logger.info("Processed %d sessions...", count)
+                logger.info(
+                    "Processed %d/%d sessions (skipped %d)...",
+                    count, total_sessions, skipped,
+                )
 
         if not X_list:
             raise RuntimeError(
@@ -209,6 +218,7 @@ class VoiceDataLoader:
                 "and contains accessible recordings."
             )
 
+        logger.info("Building feature matrix from %d samples...", len(X_list))
         X = np.vstack(X_list)
         y = np.array(y_list, dtype=np.int64)
 

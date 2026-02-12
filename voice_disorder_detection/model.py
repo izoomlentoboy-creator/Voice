@@ -105,6 +105,7 @@ class VoiceDisorderModel:
         X_scaled = self.scaler.fit_transform(X)
 
         self.model = self._build_model(n_classes)
+        logger.info("Fitting %s model, this may take a while...", self.backend)
         self.model.fit(X_scaled, y_encoded)
 
         # Build incremental learner

@@ -87,6 +87,33 @@ class VoiceDataLoader:
                 logger.warning("Cache load failed: %s", e)
 
         logger.info("Extracting features (mode=%s, augment=%s)...", mode, augment)
+
+        # Preflight: check that at least one recording is accessible
+        if self.db.number_of_sessions_downloaded == 0:
+            logger.warning(
+                "No sessions downloaded yet (download_mode=%s, dbdir=%s). "
+                "Attempting preflight download of first session...",
+                self.download_mode, self.dbdir,
+            )
+            try:
+                first_session = next(self.db.iter_sessions(), None)
+                if first_session:
+                    test_session = self.db.get_session(
+                        first_session.id, query_recordings=True,
+                    )
+                    if test_session and test_session.recordings:
+                        test_rec = self.db.get_recording(
+                            test_session.recordings[0].id, full_file_paths=True,
+                        )
+                        if test_rec:
+                            _ = test_rec.nspdata
+                            logger.info("Preflight download OK")
+            except Exception as e:
+                logger.error(
+                    "Preflight download FAILED: %s. "
+                    "Check network access and database availability.", e,
+                )
+
         X_list, y_list, session_ids, speaker_ids = [], [], [], []
         metadata_list = []
         pathology_map = {}
@@ -140,11 +167,15 @@ class VoiceDataLoader:
 
                 rec_full = self.db.get_recording(rec.id, full_file_paths=True)
                 if rec_full is None:
+                    logger.warning("Recording %d returned None", rec.id)
                     continue
 
                 try:
                     audio = rec_full.nspdata
-                except Exception:
+                except Exception as e:
+                    logger.warning(
+                        "Failed to load audio for recording %d: %s", rec.id, e,
+                    )
                     audio = None
 
                 if audio is None or len(audio) < 100:

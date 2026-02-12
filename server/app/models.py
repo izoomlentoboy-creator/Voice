@@ -3,8 +3,8 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, LargeBinary, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
 
@@ -30,6 +30,9 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
+    analyses: Mapped[list["Analysis"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    feedback: Mapped[list["Feedback"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
 
 class Analysis(Base):
     """Single voice analysis session."""
@@ -37,7 +40,7 @@ class Analysis(Base):
     __tablename__ = "analyses"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     # Result
@@ -66,6 +69,9 @@ class Analysis(Base):
     model_version: Mapped[str | None] = mapped_column(String(100))
     processing_time_ms: Mapped[int | None] = mapped_column(Integer)
 
+    user: Mapped["User"] = relationship(back_populates="analyses")
+    feedback: Mapped[list["Feedback"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
+
 
 class Feedback(Base):
     """User feedback / correction after visiting a doctor."""
@@ -73,9 +79,12 @@ class Feedback(Base):
     __tablename__ = "feedback"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    analysis_id: Mapped[str] = mapped_column(String(36), index=True)
-    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    analysis_id: Mapped[str] = mapped_column(String(36), ForeignKey("analyses.id"), index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
     actual_diagnosis: Mapped[str | None] = mapped_column(String(50))
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     applied: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    analysis: Mapped["Analysis"] = relationship(back_populates="feedback")
+    user: Mapped["User"] = relationship(back_populates="feedback")

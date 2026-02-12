@@ -24,6 +24,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt
-      - run: pip install pytest shap fastapi uvicorn python-multipart sqlalchemy aiofiles httpx
+      - run: pip install -r requirements.txt -r server/requirements.txt
+      - run: pip install pytest shap
       - run: pytest tests/ server/tests/ -v --tb=short

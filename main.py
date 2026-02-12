@@ -15,6 +15,7 @@ Usage:
     python main.py fit-monitor [--max-samples N]
     python main.py check-drift [--max-samples N]
     python main.py report [--max-samples N] [--output-dir DIR]
+    python main.py download
     python main.py status
     python main.py db-info
 """
@@ -246,6 +247,19 @@ def cmd_status(args):
     print(json.dumps(pipeline.status(), indent=2, default=str))
 
 
+def cmd_download(args):
+    from sbvoicedb import SbVoiceDb
+
+    db_kwargs = {"download_mode": "immediate"}
+    if args.dbdir:
+        db_kwargs["dbdir"] = args.dbdir
+    print("Downloading Saarbruecken Voice Database from Zenodo...")
+    print("This may take a while (~20 GB).")
+    db = SbVoiceDb(**db_kwargs)
+    print(f"\nDone. Sessions: {db.number_of_all_sessions} "
+          f"(downloaded: {db.number_of_sessions_downloaded})")
+
+
 def cmd_db_info(args):
     pipeline = VoiceDisorderPipeline(mode=args.mode, dbdir=args.dbdir, download_mode="off")
     try:
@@ -311,6 +325,7 @@ def main():
     p.add_argument("--max-samples", type=int)
     p.add_argument("--output-dir", type=str, default=None)
 
+    sub.add_parser("download", help="Download the voice database from Zenodo")
     sub.add_parser("status")
     sub.add_parser("db-info")
 
@@ -328,6 +343,7 @@ def main():
         "optimize": cmd_optimize, "explain": cmd_explain,
         "calibrate": cmd_calibrate, "fit-monitor": cmd_fit_monitor,
         "check-drift": cmd_check_drift, "report": cmd_report,
+        "download": cmd_download,
         "status": cmd_status, "db-info": cmd_db_info,
     }
     cmds.get(args.command, lambda _: parser.print_help())(args)

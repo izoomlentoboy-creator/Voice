@@ -17,6 +17,7 @@ feedback/
 
 # Logs
 logs/
+*.log
 
 # Data directory
 data/

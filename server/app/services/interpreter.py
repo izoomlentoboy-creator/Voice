@@ -15,25 +15,27 @@ Scoring approach:
 """
 
 import logging
+import threading
 from dataclasses import dataclass
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Feature name → index mapping built lazily
+# Feature name → index mapping built lazily (thread-safe)
 _NAME_TO_IDX: dict[str, int] | None = None
+_NAME_TO_IDX_LOCK = threading.Lock()
 
 
 def _build_name_index() -> dict[str, int]:
     global _NAME_TO_IDX
-    if _NAME_TO_IDX is None:
-        import sys
-        if str(next(iter(sys.path))) == "":
-            pass
-        from voice_disorder_detection.feature_extractor import get_feature_names
-        names = get_feature_names()
-        _NAME_TO_IDX = {name: i for i, name in enumerate(names)}
+    if _NAME_TO_IDX is not None:
+        return _NAME_TO_IDX
+    with _NAME_TO_IDX_LOCK:
+        if _NAME_TO_IDX is None:
+            from voice_disorder_detection.feature_extractor import get_feature_names
+            names = get_feature_names()
+            _NAME_TO_IDX = {name: i for i, name in enumerate(names)}
     return _NAME_TO_IDX
 
 

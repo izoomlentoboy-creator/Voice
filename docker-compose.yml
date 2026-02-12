@@ -9,12 +9,15 @@ services:
       # Persist database and models across restarts
       - tbvoice-data:/app/server
       - ./models:/app/models
+      - sbvoicedb-cache:/root/.cache/sbvoicedb
+      - ./cache:/app/cache
     environment:
       - TBVOICE_DATABASE_URL=sqlite:///./server/tbvoice.db
       - TBVOICE_MODEL_BACKEND=${TBVOICE_MODEL_BACKEND:-ensemble}
       - TBVOICE_MODEL_MODE=${TBVOICE_MODEL_MODE:-binary}
       - TBVOICE_DEBUG=${TBVOICE_DEBUG:-false}
       - TBVOICE_WORKERS=${TBVOICE_WORKERS:-2}
+      - SBVOICEDB_DIR=/root/.cache/sbvoicedb
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
@@ -24,3 +27,4 @@ services:
 
 volumes:
   tbvoice-data:
+  sbvoicedb-cache:

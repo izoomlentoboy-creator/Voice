@@ -1,9 +1,14 @@
-"""GET /api/v1/history/{user_id} — analysis history."""
+"""GET /api/v1/history/{user_id} — analysis history.
+
+Requires X-Device-Key header matching the user_id to prevent
+unauthorized access to other users' analysis history (IDOR protection).
+"""
 
 import json
 import logging
+import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -21,6 +26,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# UUID v4 pattern for input validation
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def _validate_user_id(user_id: str) -> str:
+    """Validate user_id format to prevent injection."""
+    if not _UUID_RE.match(user_id):
+        raise HTTPException(status_code=400, detail="Некорректный формат user_id")
+    return user_id
+
 
 @router.get(
     "/history/{user_id}",
@@ -31,8 +46,18 @@ def get_history(
     user_id: str,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    x_device_key: str = Header(None, alias="X-Device-Key"),
     db: Session = Depends(get_db),
 ):
+    _validate_user_id(user_id)
+
+    # Ownership check: the requesting device must match the user_id
+    if x_device_key is None or x_device_key != user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Доступ запрещён. Недействительный ключ устройства.",
+        )
+
     total = db.query(Analysis).filter(Analysis.user_id == user_id).count()
     analyses = (
         db.query(Analysis)
@@ -65,11 +90,19 @@ def get_history(
 )
 def get_analysis(
     analysis_id: str,
+    x_device_key: str = Header(None, alias="X-Device-Key"),
     db: Session = Depends(get_db),
 ):
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if analysis is None:
         raise HTTPException(status_code=404, detail="Анализ не найден")
+
+    # Ownership check: only the device that created the analysis can access it
+    if x_device_key is None or x_device_key != analysis.user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Доступ запрещён. Недействительный ключ устройства.",
+        )
 
     # Parse stored category scores
     default_cat = CategoryScore(status="normal", label="—", score=0.75)

@@ -73,7 +73,6 @@ def validate_and_load(file_bytes: bytes, filename: str) -> tuple[np.ndarray, int
     try:
         audio, sr = librosa.load(tmp_path, sr=None, mono=True)
     except Exception as e:
-        Path(tmp_path).unlink(missing_ok=True)
         raise AudioValidationError(
             f"Не удалось прочитать аудио. Поддерживаются WAV, FLAC, OGG. Ошибка: {e}"
         )

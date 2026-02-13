@@ -14,6 +14,9 @@ Base.metadata.create_all(bind=engine)
 
 client = TestClient(app)
 
+# A valid UUID for testing
+_TEST_USER_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
 
 def _make_wav_bytes(duration_sec: float = 2.0, sr: int = 16000) -> bytes:
     """Generate a valid WAV file as bytes (sine wave)."""
@@ -74,19 +77,45 @@ class TestRootEndpoint:
 
 
 class TestHistoryEndpoint:
-    def test_empty_history(self):
-        resp = client.get("/api/v1/history/nonexistent-user-id")
+    def test_empty_history_with_auth(self):
+        """History for a valid UUID with correct device key should return empty list."""
+        resp = client.get(
+            f"/api/v1/history/{_TEST_USER_ID}",
+            headers={"X-Device-Key": _TEST_USER_ID},
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 0
         assert data["analyses"] == []
+
+    def test_history_without_auth_returns_403(self):
+        """History without X-Device-Key header should return 403."""
+        resp = client.get(f"/api/v1/history/{_TEST_USER_ID}")
+        assert resp.status_code == 403
+
+    def test_history_wrong_device_key_returns_403(self):
+        """History with mismatched device key should return 403."""
+        wrong_key = "00000000-0000-0000-0000-000000000000"
+        resp = client.get(
+            f"/api/v1/history/{_TEST_USER_ID}",
+            headers={"X-Device-Key": wrong_key},
+        )
+        assert resp.status_code == 403
+
+    def test_history_invalid_user_id_format_returns_400(self):
+        """Non-UUID user_id should return 400."""
+        resp = client.get(
+            "/api/v1/history/not-a-uuid",
+            headers={"X-Device-Key": "not-a-uuid"},
+        )
+        assert resp.status_code == 400
 
 
 class TestFeedbackEndpoint:
     def test_feedback_nonexistent_analysis(self):
         resp = client.post("/api/v1/feedback", json={
             "analysis_id": "nonexistent",
-            "user_id": "test-user",
+            "user_id": _TEST_USER_ID,
             "actual_diagnosis": "healthy",
         })
         assert resp.status_code == 404
@@ -107,7 +136,7 @@ class TestAnalyzeEndpoint:
                 "audio_i": ("i.wav", wav, "audio/wav"),
                 "audio_u": ("u.wav", wav, "audio/wav"),
             },
-            data={"user_id": "test-user-123"},
+            data={"user_id": _TEST_USER_ID},
         )
         assert resp.status_code == 503
 
@@ -124,6 +153,6 @@ class TestAnalyzeEndpoint:
                 "audio_i": ("i.wav", b"not audio", "audio/wav"),
                 "audio_u": ("u.wav", b"not audio", "audio/wav"),
             },
-            data={"user_id": "test-user-123"},
+            data={"user_id": _TEST_USER_ID},
         )
         assert resp.status_code == 400

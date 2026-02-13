@@ -284,8 +284,13 @@ class SelfTester:
         self, X: np.ndarray, y: np.ndarray,
         speaker_ids: Optional[list[int]] = None, n_iter: int = 20,
     ) -> dict:
-        """Random search hyperparameter optimization with patient-level split."""
+        """Random search hyperparameter optimization with patient-level split.
+
+        Uses VotingClassifier for fast iteration during search, then the
+        best_params are applied to the StackingClassifier via model.train().
+        """
         from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier, VotingClassifier
+        from sklearn.preprocessing import LabelEncoder, StandardScaler
         from sklearn.svm import SVC
 
         logger.info("Starting hyperparameter optimization (%d iterations)...", n_iter)
@@ -302,15 +307,12 @@ class SelfTester:
         X_train, X_val = X[train_idx], X[val_idx]
         y_train, y_val = y[train_idx], y[val_idx]
 
-        scaler = self.model.scaler
-        if not hasattr(scaler, "mean_") or scaler.mean_ is None:
-            scaler.fit(X_train)
-        X_train_s = scaler.transform(X_train)
+        # Use fresh scaler and label encoder for optimization to avoid state issues
+        scaler = StandardScaler()
+        X_train_s = scaler.fit_transform(X_train)
         X_val_s = scaler.transform(X_val)
-        le = self.model.label_encoder
-        if not hasattr(le, "classes_") or le.classes_ is None:
-            le.fit(y)
-        y_train_e = le.transform(y_train)
+        le = LabelEncoder()
+        y_train_e = le.fit_transform(y_train)
         y_val_e = le.transform(y_val)
 
         best_score = 0.0
@@ -336,6 +338,7 @@ class SelfTester:
                                                 learning_rate=params["gb_learning_rate"],
                                                 max_depth=params["gb_max_depth"],
                                                 random_state=config.RANDOM_STATE)
+                # Use VotingClassifier during search for speed
                 ensemble = VotingClassifier(estimators=[("svm", svm), ("rf", rf), ("gb", gb)],
                                             voting="soft", n_jobs=-1)
                 ensemble.fit(X_train_s, y_train_e)

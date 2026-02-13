@@ -4,7 +4,9 @@ Voice disorder screening API that processes uploaded audio recordings
 through a trained ML pipeline and returns user-friendly results.
 """
 
+import collections
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -53,14 +55,56 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# --- CORS (allow iOS app) ---
+# --- CORS ---
+# Configurable via environment variable. Defaults to localhost for dev safety.
+_allowed_origins = os.environ.get("TBVOICE_CORS_ORIGINS", "").split(",")
+_allowed_origins = [o.strip() for o in _allowed_origins if o.strip()]
+if not _allowed_origins:
+    _allowed_origins = ["http://localhost:3000", "http://localhost:8080"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict to app's domain
+    allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+# --- Rate limiting middleware ---
+_rate_limit_window: dict[str, collections.deque] = {}
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Enforce per-client rate limiting based on IP address."""
+    if request.url.path.endswith("/health"):
+        return await call_next(request)
+
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    window_seconds = 60.0
+
+    if client_ip not in _rate_limit_window:
+        _rate_limit_window[client_ip] = collections.deque()
+
+    timestamps = _rate_limit_window[client_ip]
+
+    while timestamps and (now - timestamps[0]) > window_seconds:
+        timestamps.popleft()
+
+    if len(timestamps) >= config.RATE_LIMIT_PER_MINUTE:
+        logger.warning("Rate limit exceeded for %s (%d requests)", client_ip, len(timestamps))
+        return JSONResponse(
+            status_code=429,
+            content={
+                "status": "error",
+                "message": "Слишком много запросов. Попробуйте через минуту.",
+            },
+        )
+
+    timestamps.append(now)
+    return await call_next(request)
 
 
 # --- Request logging middleware ---

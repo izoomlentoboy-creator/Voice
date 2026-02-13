@@ -13,6 +13,7 @@ NOTE: This is a screening tool, not a substitute for professional diagnosis.
 
 import logging
 import tempfile
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -21,6 +22,24 @@ from voice_disorder_detection import config
 from voice_disorder_detection.pipeline import VoiceDisorderPipeline
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+pipeline = VoiceDisorderPipeline(
+    mode=config.MODE_BINARY,
+    download_mode="off",
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load model at startup so first request doesn't fail."""
+    try:
+        pipeline._ensure_model_loaded()
+        logger.info("Model loaded at startup.")
+    except RuntimeError:
+        logger.warning("No trained model found. Train a model first.")
+    yield
+
 
 app = FastAPI(
     title="Voice Disorder Detection API",
@@ -29,11 +48,7 @@ app = FastAPI(
         "This is a screening tool — not a substitute for professional medical diagnosis."
     ),
     version="1.0.0",
-)
-
-pipeline = VoiceDisorderPipeline(
-    mode=config.MODE_BINARY,
-    download_mode="off",
+    lifespan=lifespan,
 )
 
 
@@ -44,6 +59,7 @@ class PredictionResponse(BaseModel):
     probabilities: dict
     abstain: bool
     abstain_reason: str | None = None
+    calibrated: bool = False
     disclaimer: str = (
         "This is an automated screening result. "
         "It is NOT a medical diagnosis. Consult a specialist."
@@ -59,7 +75,7 @@ class StatusResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok" if pipeline.model.is_trained else "degraded"}
 
 
 @app.get("/status", response_model=StatusResponse)
@@ -82,7 +98,6 @@ async def predict(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read file: {e}")
 
-    # Write to temp file for librosa
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -120,4 +135,5 @@ async def predict(file: UploadFile = File(...)):
         probabilities=result["probabilities"],
         abstain=result["abstain"],
         abstain_reason=result.get("abstain_reason"),
+        calibrated=result.get("calibrated", False),
     )

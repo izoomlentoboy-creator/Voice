@@ -72,10 +72,16 @@ class VoiceDataLoader:
 
         if use_cache and cache_file.exists():
             try:
-                cached = np.load(cache_file, allow_pickle=True)
+                # Load numeric arrays without allow_pickle for security.
+                # Metadata is stored separately as JSON.
+                cached = np.load(cache_file, allow_pickle=False)
                 if str(cached.get("cache_key", "")) == cache_key:
                     logger.info("Loading features from cache: %s", cache_file)
-                    meta = cached["metadata"].item() if "metadata" in cached else []
+                    meta_cache = cache_file.with_suffix(".meta.json")
+                    meta = []
+                    if meta_cache.exists():
+                        with open(meta_cache, encoding="utf-8") as _f:
+                            meta = json.load(_f)
                     return (
                         cached["X"],
                         cached["y"],
@@ -212,7 +218,7 @@ class VoiceDataLoader:
         X = np.vstack(X_list)
         y = np.array(y_list, dtype=np.int64)
 
-        # Save cache
+        # Save cache (numeric arrays + metadata as separate JSON)
         if use_cache:
             try:
                 np.savez(
@@ -220,9 +226,12 @@ class VoiceDataLoader:
                     X=X, y=y,
                     session_ids=np.array(session_ids),
                     speaker_ids=np.array(speaker_ids),
-                    metadata=np.array(metadata_list, dtype=object),
-                    cache_key=cache_key,
+                    cache_key=np.array(cache_key),
                 )
+                # Store metadata separately as JSON (avoids allow_pickle)
+                meta_cache = cache_file.with_suffix(".meta.json")
+                with open(meta_cache, "w", encoding="utf-8") as _f:
+                    json.dump(metadata_list, _f, ensure_ascii=False)
                 logger.info("Features cached to %s", cache_file)
             except Exception as e:
                 logger.warning("Cache save failed: %s", e)

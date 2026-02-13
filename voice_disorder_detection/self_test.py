@@ -323,7 +323,7 @@ class SelfTester:
                 "svm_C": float(rng.choice([0.1, 1.0, 10.0, 100.0])),
                 "svm_gamma": str(rng.choice(["scale", "auto"])),
                 "rf_n_estimators": int(rng.choice([100, 200, 300, 500])),
-                "rf_max_depth": int(rng.choice([5, 10, 20, 0])) or None,
+                "rf_max_depth": rng.choice([5, 10, 20, None]),
                 "gb_n_estimators": int(rng.choice([100, 200, 300])),
                 "gb_learning_rate": float(rng.choice([0.01, 0.05, 0.1, 0.2])),
                 "gb_max_depth": int(rng.choice([3, 5, 7])),
@@ -424,7 +424,8 @@ class SelfTester:
                     metrics["brier_score"] = round(float(brier_score_loss(y_true, proba_pos)), 4)
 
                     # Expected Calibration Error (ECE)
-                    metrics["ece"] = round(float(self._compute_ece(y_true, proba_pos)), 4)
+                    from .calibration import compute_ece
+                    metrics["ece"] = round(float(compute_ece(y_true, proba_pos)), 4)
                 else:
                     metrics["auc_roc"] = round(float(roc_auc_score(
                         y_true, y_proba, multi_class="ovr", average="weighted",
@@ -442,17 +443,13 @@ class SelfTester:
 
     @staticmethod
     def _compute_ece(y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10) -> float:
-        """Compute Expected Calibration Error."""
-        bin_edges = np.linspace(0, 1, n_bins + 1)
-        ece = 0.0
-        for lo, hi in zip(bin_edges[:-1], bin_edges[1:]):
-            mask = (y_prob >= lo) & (y_prob < hi)
-            if mask.sum() == 0:
-                continue
-            bin_acc = y_true[mask].mean()
-            bin_conf = y_prob[mask].mean()
-            ece += mask.sum() * abs(bin_acc - bin_conf)
-        return ece / len(y_true) if len(y_true) > 0 else 0.0
+        """Compute Expected Calibration Error.
+
+        Delegates to calibration.compute_ece for a single implementation.
+        Kept as a static method for backward compatibility.
+        """
+        from .calibration import compute_ece
+        return compute_ece(y_true, y_prob, n_bins=n_bins)
 
     def _record_result(self, test_type: str, results: dict) -> None:
         record = {

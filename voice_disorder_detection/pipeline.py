@@ -248,13 +248,7 @@ class VoiceDisorderPipeline:
         features = extract_all_features(audio, sr)
         X = features.reshape(1, -1)
 
-        # Apply feature selector if available
-        if self.model._feature_selector is not None:
-            try:
-                X = self.model._feature_selector.transform(X)
-            except Exception:
-                pass
-
+        # Feature selection and scaling are handled inside model.predict_with_confidence
         results = self.model.predict_with_confidence(X)
         prediction = results[0]
 
@@ -301,12 +295,7 @@ class VoiceDisorderPipeline:
         combined = np.mean(features_list, axis=0)
         X = combined.reshape(1, -1)
 
-        if self.model._feature_selector is not None:
-            try:
-                X = self.model._feature_selector.transform(X)
-            except Exception:
-                pass
-
+        # Feature selection and scaling are handled inside model.predict_with_confidence
         results = self.model.predict_with_confidence(X)
         prediction = results[0]
 

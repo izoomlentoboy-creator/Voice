@@ -87,6 +87,23 @@ def compute_reliability_diagram(
     }
 
 
+def compute_ece(y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10) -> float:
+    """Compute Expected Calibration Error (ECE).
+
+    Canonical implementation used by both calibration and self_test modules.
+    """
+    bin_edges = np.linspace(0, 1, n_bins + 1)
+    ece = 0.0
+    for lo, hi in zip(bin_edges[:-1], bin_edges[1:]):
+        mask = (y_prob >= lo) & (y_prob < hi)
+        if mask.sum() == 0:
+            continue
+        bin_acc = y_true[mask].mean()
+        bin_conf = y_prob[mask].mean()
+        ece += mask.sum() * abs(bin_acc - bin_conf)
+    return ece / len(y_true) if len(y_true) > 0 else 0.0
+
+
 # ------------------------------------------------------------------
 # Post-hoc calibration
 # ------------------------------------------------------------------
@@ -143,8 +160,9 @@ def calibrate_model(
     X_cal, y_cal = X[cal_idx], y[cal_idx]
     X_test, y_test = X[test_idx], y[test_idx]
 
-    # Train base model
-    model.train(X_train, y_train)
+    # Train base model (preserve speaker_ids for patient-level aware training)
+    train_speaker_ids = [speaker_ids[i] for i in train_idx] if speaker_ids else None
+    model.train(X_train, y_train, speaker_ids=train_speaker_ids)
 
     # Probabilities before calibration
     proba_before_test = model.predict_proba(X_test)

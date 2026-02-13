@@ -120,7 +120,6 @@ class VoiceDisorderModel:
         session_ids: Optional[list[int]] = None,
         speaker_ids: Optional[list[int]] = None,
         params: Optional[dict] = None,
-        sample_weight: Optional[np.ndarray] = None,
     ) -> dict:
         """Train the model on extracted features.
 
@@ -128,8 +127,6 @@ class VoiceDisorderModel:
         ----------
         params : dict, optional
             Hyperparameter dict (from optimize). If None, uses defaults.
-        sample_weight : np.ndarray, optional
-            Per-sample weights for handling class imbalance in GB.
         """
         logger.info(
             "Training %s model (backend=%s): %d samples, %d features",
@@ -143,22 +140,11 @@ class VoiceDisorderModel:
 
         self.model = self._build_model(n_classes, params=params)
 
-        # Compute sample weights for class imbalance if not provided
-        if sample_weight is None:
-            unique_classes, class_counts = np.unique(y_encoded, return_counts=True)
-            total = len(y_encoded)
-            weight_map = {
-                cls: total / (n_classes * cnt)
-                for cls, cnt in zip(unique_classes, class_counts)
-            }
-            sample_weight = np.array([weight_map[yi] for yi in y_encoded])
-
-        # Stacking/Voting classifiers use sample_weight via fit
-        try:
-            self.model.fit(X_scaled, y_encoded, sample_weight=sample_weight)
-        except TypeError:
-            # Some estimators don't support sample_weight directly
-            self.model.fit(X_scaled, y_encoded)
+        # Class imbalance is handled via class_weight="balanced" on individual
+        # estimators (SVM, RF, GB, LogReg). StackingClassifier does not
+        # propagate sample_weight to sub-estimators, so we rely on per-estimator
+        # balanced class weights instead — which is more correct for ensemble methods.
+        self.model.fit(X_scaled, y_encoded)
 
         # Build incremental learner that mirrors the main model
         self._incremental_model = SGDClassifier(
@@ -195,17 +181,30 @@ class VoiceDisorderModel:
         logger.info("Training complete in %.2fs. Classes: %s", elapsed, self.label_encoder.classes_)
         return self.training_metadata
 
+    def _prepare_features(self, X: np.ndarray) -> np.ndarray:
+        """Apply feature selection (if fitted) and scaling.
+
+        Centralises the transform path so predict, predict_proba,
+        and predict_with_confidence all behave identically.
+        """
+        if self._feature_selector is not None:
+            try:
+                X = self._feature_selector.transform(X)
+            except ValueError:
+                pass  # feature count mismatch — skip selector
+        return self.scaler.transform(X)
+
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict class labels."""
         self._check_trained()
-        X_scaled = self.scaler.transform(X)
+        X_scaled = self._prepare_features(X)
         y_pred = self.model.predict(X_scaled)
         return self.label_encoder.inverse_transform(y_pred)
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """Predict class probabilities (calibrated if available)."""
         self._check_trained()
-        X_scaled = self.scaler.transform(X)
+        X_scaled = self._prepare_features(X)
 
         # Use calibrated model if available for better probability estimates
         if self._calibrator is not None:
@@ -226,9 +225,15 @@ class VoiceDisorderModel:
         self._check_trained()
         threshold = abstain_threshold if abstain_threshold is not None else config.ABSTAIN_THRESHOLD
 
-        # Use raw model for label, calibrated for probabilities
-        labels = self.predict(X)
-        probas = self.predict_proba(X)
+        # Prepare features once, then predict labels and probabilities
+        # to avoid double-scaling.
+        X_scaled = self._prepare_features(X)
+        y_pred = self.model.predict(X_scaled)
+        labels = self.label_encoder.inverse_transform(y_pred)
+        if self._calibrator is not None:
+            probas = self._calibrator.predict_proba(X_scaled)
+        else:
+            probas = self.model.predict_proba(X_scaled)
 
         results = []
         for i in range(len(labels)):
@@ -262,7 +267,7 @@ class VoiceDisorderModel:
         """
         self._check_trained()
         y_encoded = self.label_encoder.transform(y)
-        X_scaled = self.scaler.transform(X)
+        X_scaled = self._prepare_features(X)
 
         # Update SGD model incrementally
         if self._incremental_model is not None:

@@ -75,7 +75,8 @@ class VoiceDataLoader:
                 # Load numeric arrays without allow_pickle for security.
                 # Metadata is stored separately as JSON.
                 cached = np.load(cache_file, allow_pickle=False)
-                if str(cached.get("cache_key", "")) == cache_key:
+                stored_key = str(cached["cache_key"]) if "cache_key" in cached else ""
+                if stored_key == cache_key:
                     logger.info("Loading features from cache: %s", cache_file)
                     meta_cache = cache_file.with_suffix(".meta.json")
                     meta = []
@@ -161,12 +162,17 @@ class VoiceDataLoader:
                     feats = extract_all_features(audio, rate)
                     session_features.append(feats)
 
-                    # Augmentation: process immediately, don't store raw audio
+                    # Augmentation: generate only the variants we will use
+                    # (noise + spec_augment = ~4 lightweight augmentations)
                     if augment:
                         processed = preprocess_audio(audio, rate)
                         try:
-                            aug_versions = augment_audio(processed, config.SAMPLE_RATE)
-                            for aug_audio in aug_versions[:2]:
+                            aug_versions = augment_audio(
+                                processed, config.SAMPLE_RATE,
+                                pitch_steps=[],    # skip expensive pitch shift
+                                stretch_rates=[],  # skip expensive time stretch
+                            )
+                            for aug_audio in aug_versions:
                                 aug_feats = extract_all_features(
                                     aug_audio, config.SAMPLE_RATE, preprocess=False,
                                 )

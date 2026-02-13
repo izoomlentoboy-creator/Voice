@@ -112,14 +112,3 @@ def validate_and_load(file_bytes: bytes, filename: str) -> tuple[np.ndarray, int
     )
 
     return audio.astype(np.float32), sr, sha256
-
-
-def merge_vowel_audios(
-    audios: list[tuple[np.ndarray, int]],
-) -> list[tuple[np.ndarray, int]]:
-    """Return the list of (audio, sr) pairs as-is.
-
-    Each vowel is processed independently for feature extraction,
-    then features are averaged (same as the training pipeline).
-    """
-    return audios

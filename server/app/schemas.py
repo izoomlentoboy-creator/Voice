@@ -9,15 +9,6 @@ from pydantic import BaseModel, Field
 # Requests
 # ------------------------------------------------------------------
 
-class UserCreate(BaseModel):
-    """Sent once on first app launch."""
-    user_id: str = Field(..., description="Device-generated UUID")
-    gender: Optional[str] = Field(None, pattern="^[mw]$")
-    age: Optional[int] = Field(None, ge=1, le=120)
-    smoking: Optional[bool] = None
-    complaints: Optional[str] = None
-
-
 class FeedbackCreate(BaseModel):
     """User submits correction after doctor visit."""
     analysis_id: str

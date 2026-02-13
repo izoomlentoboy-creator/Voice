@@ -1,4 +1,4 @@
-"""TBVoice — FastAPI server application.
+"""EchoFlow 1.0 — FastAPI server application.
 
 Voice disorder screening API that processes uploaded audio recordings
 through a trained ML pipeline and returns user-friendly results.
@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import config
 from .database import create_tables
@@ -24,13 +25,13 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%H:%M:%S",
 )
-logger = logging.getLogger("tbvoice")
+logger = logging.getLogger("echoflow")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: create tables and load ML model. Shutdown: cleanup."""
-    logger.info("TBVoice server starting...")
+    logger.info("EchoFlow 1.0 server starting...")
     create_tables()
     logger.info("Database tables created.")
 
@@ -42,16 +43,16 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    logger.info("TBVoice server shutting down.")
+    logger.info("EchoFlow 1.0 server shutting down.")
 
 
 app = FastAPI(
-    title="TBVoice API",
+    title="EchoFlow 1.0 API",
     description=(
-        "Voice disorder screening API. Upload vowel recordings "
-        "(А, И, У) and receive an AI-powered voice analysis."
+        "AI-powered voice disorder detection system. Upload vowel recordings "
+        "(А, И, У) and receive an intelligent voice analysis."
     ),
-    version="1.0.0",
+    version="1.0",
     lifespan=lifespan,
 )
 
@@ -163,12 +164,25 @@ app.include_router(feedback.router, prefix=config.API_PREFIX, tags=["Feedback"])
 app.include_router(health.router, prefix=config.API_PREFIX, tags=["Health"])
 
 
+# --- Mount static files ---
+import os
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    logger.info("Static files mounted at /static")
+
 # --- Root ---
+from fastapi.responses import FileResponse
+
 @app.get("/", include_in_schema=False)
 def root():
+    """Serve the web interface."""
+    index_path = os.path.join(static_dir, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
     return {
-        "app": "TBVoice",
-        "version": "1.0.0",
+        "app": "EchoFlow",
+        "version": "1.0",
         "docs": "/docs",
         "health": f"{config.API_PREFIX}/health",
     }

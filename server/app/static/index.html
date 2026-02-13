@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EchoFlow 1.0 - Анализ голоса</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 600px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .logo {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            color: #333;
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .version {
+            color: #888;
+            font-size: 14px;
+        }
+
+        .description {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .recording-section {
+            margin-bottom: 30px;
+        }
+
+        .vowel-card {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            transition: all 0.3s ease;
+        }
+
+        .vowel-card.recording {
+            background: #e3f2fd;
+            border: 2px solid #2196F3;
+        }
+
+        .vowel-card.completed {
+            background: #e8f5e9;
+            border: 2px solid #4CAF50;
+        }
+
+        .vowel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .vowel-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-badge.pending {
+            background: #e0e0e0;
+            color: #666;
+        }
+
+        .status-badge.recording {
+            background: #2196F3;
+            color: white;
+        }
+
+        .status-badge.completed {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .instruction {
+            color: #666;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+
+        .record-button {
+            width: 100%;
+            padding: 15px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .record-button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .record-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .record-button.recording {
+            background: #f44336;
+        }
+
+        .record-button.recording:hover {
+            background: #d32f2f;
+        }
+
+        .visualizer {
+            height: 60px;
+            background: #f0f0f0;
+            border-radius: 8px;
+            margin-top: 15px;
+            display: none;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .visualizer.active {
+            display: block;
+        }
+
+        .visualizer-bar {
+            position: absolute;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(to top, #667eea, #764ba2);
+            border-radius: 2px 2px 0 0;
+            transition: height 0.1s ease;
+        }
+
+        .timer {
+            text-align: center;
+            font-size: 32px;
+            font-weight: bold;
+            color: #667eea;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .timer.active {
+            display: block;
+        }
+
+        .analyze-button {
+            width: 100%;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 20px;
+        }
+
+        .analyze-button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .analyze-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .results {
+            display: none;
+            margin-top: 30px;
+        }
+
+        .results.show {
+            display: block;
+        }
+
+        .result-card {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+        }
+
+        .verdict {
+            text-align: center;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        .verdict.healthy {
+            background: linear-gradient(135deg, #4CAF50, #8BC34A);
+            color: white;
+        }
+
+        .verdict.pathological {
+            background: linear-gradient(135deg, #FF9800, #FF5722);
+            color: white;
+        }
+
+        .verdict.abstain {
+            background: linear-gradient(135deg, #FFC107, #FF9800);
+            color: white;
+        }
+
+        .verdict-label {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .confidence {
+            font-size: 48px;
+            font-weight: bold;
+            margin: 15px 0;
+        }
+
+        .category {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .category-name {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .category-score {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .score-bar {
+            width: 100px;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .score-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            transition: width 0.5s ease;
+        }
+
+        .score-value {
+            font-weight: bold;
+            color: #667eea;
+            min-width: 40px;
+            text-align: right;
+        }
+
+        .recommendation {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+
+        .recommendation-title {
+            font-weight: bold;
+            color: #856404;
+            margin-bottom: 10px;
+        }
+
+        .recommendation-text {
+            color: #856404;
+            line-height: 1.6;
+        }
+
+        .disclaimer {
+            background: #f8d7da;
+            border-left: 4px solid #f44336;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            font-size: 13px;
+            color: #721c24;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .error.show {
+            display: block;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 20px;
+            }
+
+            h1 {
+                font-size: 24px;
+            }
+
+            .vowel-title {
+                font-size: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">🎤</div>
+            <h1>EchoFlow</h1>
+            <div class="version">версия 1.0</div>
+        </div>
+
+        <div class="description">
+            Анализ голоса с помощью искусственного интеллекта для выявления возможных голосовых расстройств.
+            Запишите 3 гласных звука для анализа.
+        </div>
+
+        <div class="recording-section" id="recordingSection">
+            <!-- Vowel A -->
+            <div class="vowel-card" id="cardA">
+                <div class="vowel-header">
+                    <div class="vowel-title">А</div>
+                    <span class="status-badge pending" id="statusA">Ожидание</span>
+                </div>
+                <div class="instruction">Произнесите "А-а-а-а-а" в течение 5 секунд</div>
+                <button class="record-button" id="btnA" onclick="recordVowel('A')">
+                    🎙️ Записать звук "А"
+                </button>
+                <div class="visualizer" id="visualizerA"></div>
+                <div class="timer" id="timerA">5</div>
+            </div>
+
+            <!-- Vowel I -->
+            <div class="vowel-card" id="cardI">
+                <div class="vowel-header">
+                    <div class="vowel-title">И</div>
+                    <span class="status-badge pending" id="statusI">Ожидание</span>
+                </div>
+                <div class="instruction">Произнесите "И-и-и-и-и" в течение 5 секунд</div>
+                <button class="record-button" id="btnI" onclick="recordVowel('I')" disabled>
+                    🎙️ Записать звук "И"
+                </button>
+                <div class="visualizer" id="visualizerI"></div>
+                <div class="timer" id="timerI">5</div>
+            </div>
+
+            <!-- Vowel U -->
+            <div class="vowel-card" id="cardU">
+                <div class="vowel-header">
+                    <div class="vowel-title">У</div>
+                    <span class="status-badge pending" id="statusU">Ожидание</span>
+                </div>
+                <div class="instruction">Произнесите "У-у-у-у-у" в течение 5 секунд</div>
+                <button class="record-button" id="btnU" onclick="recordVowel('U')" disabled>
+                    🎙️ Записать звук "У"
+                </button>
+                <div class="visualizer" id="visualizerU"></div>
+                <div class="timer" id="timerU">5</div>
+            </div>
+
+            <button class="analyze-button" id="analyzeBtn" onclick="analyzeVoice()" disabled>
+                🔍 Анализировать голос
+            </button>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <div>Анализируем ваш голос...</div>
+        </div>
+
+        <div class="error" id="error"></div>
+
+        <div class="results" id="results">
+            <!-- Results will be inserted here -->
+        </div>
+
+        <div class="disclaimer">
+            ⚠️ <strong>Важно:</strong> Это инструмент скрининга для исследовательских целей. 
+            Он НЕ является медицинским диагнозом. При получении результата "Возможны нарушения" 
+            обратитесь к врачу-специалисту.
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

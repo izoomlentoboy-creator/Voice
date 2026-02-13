@@ -99,7 +99,7 @@ Each recording session contains:
 - **Audio**: 16-bit PCM (`.nsp` format), variable sample rate → resampled to 16 kHz
 - **EGG**: Electroglottogram (not used in current models)
 - **Metadata**: speaker ID, gender, birthdate, age at recording, pathology names (German)
-- **Utterances used**: `a_n`, `i_n`, `u_n`, `a_l`, `i_l`, `u_l`, `a_h`, `i_h`, `u_h` (sustained vowels at 3 pitch levels)
+- **Utterances**: `a_n`, `i_n`, `u_n` (normal pitch, **default**); extended set also includes `a_l`, `i_l`, `u_l`, `a_h`, `i_h`, `u_h` (low/high pitch)
 
 ## Features (322 dimensions)
 
@@ -115,7 +115,7 @@ Each recording session contains:
 
 | Backend | Description | Use case |
 |---|---|---|
-| `ensemble` (default) | SVM + Random Forest + Gradient Boosting, soft voting | Best accuracy |
+| `ensemble` (default) | SVM + Random Forest + Gradient Boosting, stacking (LogReg meta-learner) | Best accuracy |
 | `logreg` | Logistic Regression with balanced weights | Baseline / interpretability |
 | `cnn` | MLP on PCA-reduced mel-spectrogram | Alternative temporal representation |
 

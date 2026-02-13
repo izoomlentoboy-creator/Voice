@@ -4,8 +4,6 @@ Converts raw audio signals into feature vectors suitable for classification.
 Extracts spectral, cepstral, temporal, and prosodic features.
 """
 
-from typing import Optional
-
 import librosa
 import numpy as np
 
@@ -197,7 +195,6 @@ def extract_all_features(
     audio: np.ndarray,
     sr: int,
     preprocess: bool = True,
-    orig_sr: Optional[int] = None,
 ) -> np.ndarray:
     """Extract the complete feature vector from an audio signal.
 
@@ -209,8 +206,6 @@ def extract_all_features(
         Sampling rate of the input audio.
     preprocess : bool
         If True, apply full preprocessing (resample, trim, normalize).
-    orig_sr : int, optional
-        Original sampling rate (used if different from sr after preprocessing).
 
     Returns
     -------

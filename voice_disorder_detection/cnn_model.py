@@ -3,6 +3,10 @@
 Uses mel-spectrogram as a 2D representation of audio, reduces
 dimensionality with PCA, and classifies with an MLP.
 Falls back to sklearn MLPClassifier (PyTorch optional).
+
+When used through VoiceDisorderModel, the class exposes a
+sklearn-compatible interface (fit/predict/predict_proba) that
+operates on pre-extracted feature vectors.
 """
 
 import logging
@@ -12,7 +16,6 @@ import librosa
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.neural_network import MLPClassifier
-from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 from . import config
 
@@ -51,18 +54,20 @@ def extract_mel_spectrogram(
 
 
 class MelSpectrogramCNN:
-    """MLP classifier on PCA-reduced mel-spectrograms.
+    """MLP classifier with PCA dimensionality reduction.
+
+    When used through VoiceDisorderModel (the standard path),
+    this receives pre-scaled feature vectors and applies
+    PCA -> MLP(256, 128).
 
     Architecture:
-        mel-spectrogram (128 x 128) -> flatten -> PCA(200) -> MLP(256, 128) -> classes
+        features (N,) -> PCA(200) -> MLP(256, 128) -> classes
     """
 
     def __init__(self, mode: str = config.MODE_BINARY):
         self.mode = mode
-        self.pca = PCA(n_components=config.MEL_PCA_COMPONENTS, random_state=config.RANDOM_STATE)
-        self.scaler = StandardScaler()
-        self.label_encoder = LabelEncoder()
-        self.model = MLPClassifier(
+        self._pca = PCA(n_components=config.MEL_PCA_COMPONENTS, random_state=config.RANDOM_STATE)
+        self._mlp = MLPClassifier(
             hidden_layer_sizes=(256, 128),
             activation="relu",
             solver="adam",
@@ -72,7 +77,45 @@ class MelSpectrogramCNN:
             random_state=config.RANDOM_STATE,
             batch_size=32,
         )
-        self.is_trained = False
+        self._pca_fitted = False
+
+    # --- sklearn-compatible interface for VoiceDisorderModel ---
+
+    def fit(self, X: np.ndarray, y: np.ndarray, **kwargs) -> "MelSpectrogramCNN":
+        """Fit PCA + MLP on pre-scaled feature vectors.
+
+        Parameters
+        ----------
+        X : np.ndarray, shape (n_samples, n_features)
+            Already-scaled feature matrix (scaler is in VoiceDisorderModel).
+        y : np.ndarray, shape (n_samples,)
+            Encoded labels.
+        """
+        n_components = min(config.MEL_PCA_COMPONENTS, X.shape[0] - 1, X.shape[1])
+        if n_components < 1:
+            n_components = 1
+        self._pca = PCA(n_components=n_components, random_state=config.RANDOM_STATE)
+        X_reduced = self._pca.fit_transform(X)
+        self._pca_fitted = True
+
+        self._mlp.fit(X_reduced, y)
+        logger.info(
+            "CNN/MLP model trained: %d samples, PCA(%d→%d), loss=%.4f",
+            X.shape[0], X.shape[1], n_components, self._mlp.loss_,
+        )
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Predict class labels from pre-scaled feature vectors."""
+        X_reduced = self._pca.transform(X) if self._pca_fitted else X
+        return self._mlp.predict(X_reduced)
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Predict class probabilities from pre-scaled feature vectors."""
+        X_reduced = self._pca.transform(X) if self._pca_fitted else X
+        return self._mlp.predict_proba(X_reduced)
+
+    # --- Standalone usage (with spectrograms) ---
 
     def prepare_features(self, spectrograms: np.ndarray, fit: bool = False) -> np.ndarray:
         """Flatten spectrograms and apply PCA + scaling.
@@ -92,67 +135,27 @@ class MelSpectrogramCNN:
 
         if fit:
             n_components = min(config.MEL_PCA_COMPONENTS, flat.shape[0], flat.shape[1])
-            self.pca = PCA(n_components=n_components, random_state=config.RANDOM_STATE)
-            reduced = self.pca.fit_transform(flat)
-            reduced = self.scaler.fit_transform(reduced)
+            self._pca = PCA(n_components=n_components, random_state=config.RANDOM_STATE)
+            reduced = self._pca.fit_transform(flat)
+            self._pca_fitted = True
         else:
-            reduced = self.pca.transform(flat)
-            reduced = self.scaler.transform(reduced)
+            reduced = self._pca.transform(flat)
 
         return reduced
-
-    def train(self, spectrograms: np.ndarray, y: np.ndarray) -> dict:
-        """Train the model.
-
-        Parameters
-        ----------
-        spectrograms : np.ndarray, shape (n_samples, n_mels, max_frames)
-        y : np.ndarray, shape (n_samples,)
-        """
-        y_enc = self.label_encoder.fit_transform(y)
-        X = self.prepare_features(spectrograms, fit=True)
-
-        self.model.fit(X, y_enc)
-        self.is_trained = True
-
-        logger.info(
-            "CNN model trained: %d samples, PCA(%d), MLP loss=%.4f",
-            len(y), X.shape[1], self.model.loss_,
-        )
-        return {
-            "backend": "cnn",
-            "n_samples": int(len(y)),
-            "pca_components": int(X.shape[1]),
-            "pca_variance_explained": round(float(sum(self.pca.explained_variance_ratio_)), 4),
-            "mlp_loss": round(float(self.model.loss_), 4),
-            "mlp_iterations": int(self.model.n_iter_),
-        }
-
-    def predict(self, spectrograms: np.ndarray) -> np.ndarray:
-        X = self.prepare_features(spectrograms)
-        y_pred = self.model.predict(X)
-        return self.label_encoder.inverse_transform(y_pred)
-
-    def predict_proba(self, spectrograms: np.ndarray) -> np.ndarray:
-        X = self.prepare_features(spectrograms)
-        return self.model.predict_proba(X)
 
     def save(self) -> None:
         path = config.model_path(self.mode, config.BACKEND_CNN)
         joblib.dump({
-            "model": self.model,
-            "pca": self.pca,
-            "scaler": self.scaler,
-            "label_encoder": self.label_encoder,
+            "mlp": self._mlp,
+            "pca": self._pca,
+            "pca_fitted": self._pca_fitted,
         }, path)
         logger.info("CNN model saved to %s", path)
 
     def load(self) -> None:
         path = config.model_path(self.mode, config.BACKEND_CNN)
         data = joblib.load(path)
-        self.model = data["model"]
-        self.pca = data["pca"]
-        self.scaler = data["scaler"]
-        self.label_encoder = data["label_encoder"]
-        self.is_trained = True
+        self._mlp = data["mlp"]
+        self._pca = data["pca"]
+        self._pca_fitted = data.get("pca_fitted", True)
         logger.info("CNN model loaded from %s", path)

@@ -98,6 +98,14 @@ async def predict(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read file: {e}")
 
+    # Reject oversized uploads (5 MB)
+    max_size = 5 * 1024 * 1024
+    if len(content) > max_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large: {len(content) / 1024 / 1024:.1f} MB (max 5 MB)",
+        )
+
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:

@@ -93,6 +93,9 @@ def get_analysis(
     x_device_key: str = Header(None, alias="X-Device-Key"),
     db: Session = Depends(get_db),
 ):
+    if not _UUID_RE.match(analysis_id):
+        raise HTTPException(status_code=400, detail="Некорректный формат analysis_id")
+
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if analysis is None:
         raise HTTPException(status_code=404, detail="Анализ не найден")

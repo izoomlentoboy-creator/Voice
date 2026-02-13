@@ -73,6 +73,9 @@ app.add_middleware(
 
 # --- Rate limiting middleware ---
 _rate_limit_window: dict[str, collections.deque] = {}
+_rate_limit_last_cleanup: float = 0.0
+_RATE_LIMIT_CLEANUP_INTERVAL: float = 300.0  # purge stale IPs every 5 min
+_RATE_LIMIT_MAX_IPS: int = 10000             # hard cap to bound memory
 
 
 @app.middleware("http")
@@ -84,6 +87,18 @@ async def rate_limit_middleware(request: Request, call_next):
     client_ip = request.client.host if request.client else "unknown"
     now = time.monotonic()
     window_seconds = 60.0
+
+    # Periodic cleanup: remove IPs with no recent requests
+    global _rate_limit_last_cleanup
+    if now - _rate_limit_last_cleanup > _RATE_LIMIT_CLEANUP_INTERVAL:
+        stale = [ip for ip, ts in _rate_limit_window.items() if not ts or (now - ts[-1]) > window_seconds]
+        for ip in stale:
+            del _rate_limit_window[ip]
+        _rate_limit_last_cleanup = now
+
+    # Hard cap: reject if tracking too many IPs (prevents memory exhaustion)
+    if client_ip not in _rate_limit_window and len(_rate_limit_window) >= _RATE_LIMIT_MAX_IPS:
+        return await call_next(request)  # fail open — don't rate-limit
 
     if client_ip not in _rate_limit_window:
         _rate_limit_window[client_ip] = collections.deque()
@@ -126,6 +141,11 @@ async def log_requests(request: Request, call_next):
 # --- Global error handler ---
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    # Let FastAPI handle HTTPExceptions normally (400, 404, 422, etc.)
+    from fastapi import HTTPException
+    if isinstance(exc, HTTPException):
+        raise exc
+
     logger.exception("Unhandled error: %s", exc)
     return JSONResponse(
         status_code=500,

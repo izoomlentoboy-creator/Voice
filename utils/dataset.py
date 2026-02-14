@@ -142,7 +142,7 @@ class VoicePathologyDataset(Dataset):
 def create_dataloaders(
     data_dir: str,
     batch_size: int = 16,
-    num_workers: int = 4,
+    num_workers: int = 8,  # OPTIMIZED: More workers
     augmentation=None
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """
@@ -176,13 +176,15 @@ def create_dataloaders(
         augmentation=None  # No augmentation for test
     )
     
-    # Create dataloaders
+    # OPTIMIZED: Create dataloaders with better parameters
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True
+        pin_memory=True,  # Fast GPU transfer
+        prefetch_factor=4,  # OPTIMIZED: More prefetch
+        persistent_workers=True  # OPTIMIZED: Don't recreate workers
     )
     
     val_loader = DataLoader(
@@ -190,7 +192,9 @@ def create_dataloaders(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True
+        pin_memory=True,
+        prefetch_factor=4,
+        persistent_workers=True
     )
     
     test_loader = DataLoader(
@@ -198,7 +202,9 @@ def create_dataloaders(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True
+        pin_memory=True,
+        prefetch_factor=4,
+        persistent_workers=True
     )
     
     return train_loader, val_loader, test_loader

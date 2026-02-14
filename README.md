@@ -50,7 +50,7 @@ cd Voice
 - **Advanced Attention Pooling** - контекстно-зависимое pooling
 - **Deep Classification Head** - градуированный dropout
 
-**Всего:** ~338M параметров (~23M обучаемых)
+**Всего:** 338.13M параметров (22.70M обучаемых)
 
 ---
 

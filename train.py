@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 import argparse
 
-from models.transformer_classifier import EchoFlowV2
+from models.echoflow_v2 import EchoFlowV2, count_parameters
 from utils.dataset import create_dataloaders
 from utils.augmentation import AugmentationPipeline
 
@@ -79,7 +79,7 @@ class Trainer:
             
             # Forward pass
             self.optimizer.zero_grad()
-            logits = self.model.classifier(audio.unsqueeze(1))
+            logits = self.model(audio)
             loss = self.criterion(logits, labels)
             
             # Backward pass
@@ -122,7 +122,7 @@ class Trainer:
                 labels = labels.to(self.device)
                 
                 # Forward pass
-                logits = self.model.classifier(audio.unsqueeze(1))
+                logits = self.model(audio)
                 loss = self.criterion(logits, labels)
                 
                 # Metrics
@@ -149,11 +149,17 @@ class Trainer:
         
         # Sensitivity (recall for pathological class)
         pathological_mask = all_labels == 1
-        sensitivity = 100.0 * np.sum(all_preds[pathological_mask] == 1) / np.sum(pathological_mask)
+        if np.sum(pathological_mask) > 0:
+            sensitivity = 100.0 * np.sum(all_preds[pathological_mask] == 1) / np.sum(pathological_mask)
+        else:
+            sensitivity = 0.0
         
         # Specificity (recall for healthy class)
         healthy_mask = all_labels == 0
-        specificity = 100.0 * np.sum(all_preds[healthy_mask] == 0) / np.sum(healthy_mask)
+        if np.sum(healthy_mask) > 0:
+            specificity = 100.0 * np.sum(all_preds[healthy_mask] == 0) / np.sum(healthy_mask)
+        else:
+            specificity = 0.0
         
         return {
             'loss': avg_loss,
@@ -266,6 +272,13 @@ def main():
         num_classes=2,
         dropout=0.1
     )
+    
+    # Print model info
+    params = count_parameters(model)
+    print(f"\nModel Parameters:")
+    print(f"  Total: {params['total_millions']:.2f}M")
+    print(f"  Trainable: {params['trainable_millions']:.2f}M")
+    print(f"  Frozen: {params['frozen'] / 1e6:.2f}M")
     
     # Create trainer
     trainer = Trainer(

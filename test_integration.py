@@ -112,14 +112,20 @@ try:
     aug = AugmentationPipeline(sr=16000)
     audio_np = np.random.randn(48000).astype(np.float32)
     
-    augmented = aug(audio_np)
+    # Test multiple times since augmentation is random (80% probability)
+    augmented_count = 0
+    for _ in range(10):
+        augmented = aug(audio_np)
+        if not np.array_equal(augmented, audio_np):
+            augmented_count += 1
     
     print(f"✓ Input shape: {audio_np.shape}")
     print(f"✓ Output shape: {augmented.shape}")
+    print(f"✓ Augmentation applied: {augmented_count}/10 times (expected ~8/10)")
     
     # Verify augmentation
     assert augmented.shape == audio_np.shape, "Augmentation should preserve shape"
-    assert not np.array_equal(augmented, audio_np), "Augmentation should modify audio"
+    assert augmented_count >= 5, f"Augmentation should work most of the time (only {augmented_count}/10)"
     print("✓ Augmentation works correctly")
 except Exception as e:
     print(f"✗ Error: {e}")

@@ -425,13 +425,18 @@ train_model() {
     print_info "You can safely close this terminal - training will continue"
     echo ""
     
-    # Run training
+    # Run training with advanced techniques
     cd "$SCRIPT_DIR"
     $PYTHON_CMD train.py \
         --data_dir "$DATA_DIR" \
         --batch_size "$batch_size" \
         --epochs "$epochs" \
         --lr "$learning_rate" \
+        --weight_decay 1e-5 \
+        --label_smoothing 0.1 \
+        --gradient_accumulation 1 \
+        --mixed_precision \
+        --early_stopping_patience 10 \
         --save_dir "$CHECKPOINT_DIR" \
         --num_workers "$num_workers" \
         2>&1 | tee -a "$LOG_FILE"
@@ -481,14 +486,20 @@ print("  TRAINING RESULTS")
 print("="*70)
 
 best_val_acc = max(history['val_acc'])
+best_val_f1 = max(history['val_f1']) if 'val_f1' in history else 0
 final_train_acc = history['train_acc'][-1]
 final_val_acc = history['val_acc'][-1]
 final_train_loss = history['train_loss'][-1]
 final_val_loss = history['val_loss'][-1]
+final_sensitivity = history['val_sensitivity'][-1] if 'val_sensitivity' in history else 0
+final_specificity = history['val_specificity'][-1] if 'val_specificity' in history else 0
 
-print(f"\nBest Validation Accuracy:  {best_val_acc:.2f}%")
-print(f"Final Train Accuracy:      {final_train_acc:.2f}%")
-print(f"Final Validation Accuracy: {final_val_acc:.2f}%")
+print(f"\nBest Validation Accuracy:  {best_val_acc*100:.2f}%")
+print(f"Best Validation F1-Score:  {best_val_f1:.4f}")
+print(f"Final Train Accuracy:      {final_train_acc*100:.2f}%")
+print(f"Final Validation Accuracy: {final_val_acc*100:.2f}%")
+print(f"Final Sensitivity:         {final_sensitivity*100:.2f}%")
+print(f"Final Specificity:         {final_specificity*100:.2f}%")
 print(f"Final Train Loss:          {final_train_loss:.4f}")
 print(f"Final Validation Loss:     {final_val_loss:.4f}")
 
@@ -496,8 +507,14 @@ print("\n" + "="*70)
 print("  PERFORMANCE ASSESSMENT")
 print("="*70)
 
-if best_val_acc >= 92.0:
+if best_val_acc >= 0.92:
     print("\n✓ EXCELLENT: Target accuracy achieved (≥92%)")
+elif best_val_acc >= 0.90:
+    print("\n✓ GOOD: Strong performance (≥90%)")
+elif best_val_acc >= 0.85:
+    print("\n⚠ ACCEPTABLE: Moderate performance (≥85%)")
+else:
+    print("\n✗ NEEDS IMPROVEMENT: Performance below target (<85%)")
     print("  Model is ready for deployment!")
 elif best_val_acc >= 90.0:
     print("\n✓ GOOD: Close to target (≥90%)")

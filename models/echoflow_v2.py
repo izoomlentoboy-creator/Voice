@@ -122,8 +122,15 @@ class Wav2Vec2FeatureExtractor(nn.Module):
                 inputs = {k: v.to(uncached_audio.device) for k, v in inputs.items()}
                 
                 # Mixed precision for faster inference
-                with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
-                    outputs = self.model(**inputs)
+                # Using torch.cuda.amp.autocast for compatibility
+                try:
+                    # PyTorch 2.0+ syntax
+                    with torch.amp.autocast('cuda', enabled=torch.cuda.is_available()):
+                        outputs = self.model(**inputs)
+                except (AttributeError, TypeError):
+                    # Fallback for older PyTorch versions
+                    with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
+                        outputs = self.model(**inputs)
         else:
             # Trainable encoder - keep gradients
             inputs = self.processor(

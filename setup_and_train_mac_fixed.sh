@@ -144,7 +144,7 @@ cat > start_training.sh << 'SCRIPT_EOF'
 #!/bin/bash
 cd "$(dirname "$0")"
 source venv/bin/activate
-python train_perfect_v3.py
+python train_perfect_v3.py --data_dir dataset
 SCRIPT_EOF
 
 chmod +x start_training.sh
@@ -173,7 +173,7 @@ echo "╚═══════════════════════�
 echo ""
 
 # Start training in background with nohup
-nohup python train_perfect_v3.py > training_output.log 2>&1 &
+nohup python train_perfect_v3.py --data_dir dataset > training_output.log 2>&1 &
 TRAIN_PID=$!
 
 echo "✅ Training started (PID: $TRAIN_PID)"
